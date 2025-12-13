@@ -58,22 +58,22 @@ jobs:
           content=$(echo "$response" | jq -r '.content')
 
           # Save to a file
-          echo "$content" > docs/hooks.md
+          echo "$content" > docs/claude/hooks.md
 
-      - name: Fetch other documentation (example)
-        id: fetch-other
-        run: |
-          # Generic endpoint example
-          response=$(curl -s -X POST \
-            ${{ steps.set-env.outputs.base_url }}/scrape \
-            -H "Content-Type: application/json" \
-            -d '{
-              "url": "https://code.claude.com/docs/en/slash-commands",
-              "selector": "#page-context-menu-button"
-            }')
+      # - name: Fetch other documentation (example)
+      #   id: fetch-other
+      #   run: |
+      #     # Generic endpoint example
+      #     response=$(curl -s -X POST \
+      #       ${{ steps.set-env.outputs.base_url }}/scrape \
+      #       -H "Content-Type: application/json" \
+      #       -d '{
+      #         "url": "https://code.claude.com/docs/en/slash-commands",
+      #         "selector": "#page-context-menu-button"
+      #       }')
 
-          content=$(echo "$response" | jq -r '.content')
-          echo "$content" > docs/slash-commands.md
+      #     content=$(echo "$response" | jq -r '.content')
+      #     echo "$content" > docs/claude/slash-commands.md
 
       - name: Check for changes
         id: check-changes
