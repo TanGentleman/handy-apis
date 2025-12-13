@@ -1,0 +1,90 @@
+# Example GitHub Workflow to update markdown files using the Content Scraper API
+#
+# Save this file to: .github/workflows/update-docs.yml
+
+name: Update Documentation Content
+
+on:
+  # Run manually with environment selection
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to use'
+        required: true
+        default: 'prod'
+        type: choice
+        options:
+          - prod
+          - dev
+
+  # Or run on a schedule (daily at midnight UTC, uses prod by default)
+  schedule:
+    - cron: '0 0 * * *'  # Daily at midnight UTC
+
+jobs:
+  update-docs:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set environment variables
+        id: set-env
+        run: |
+          # Set environment (default to prod for scheduled runs)
+          ENV="${{ github.event.inputs.environment || 'prod' }}"
+          echo "environment=$ENV" >> $GITHUB_OUTPUT
+
+          # Construct URL based on environment
+          if [ "$ENV" = "dev" ]; then
+            URL_SUFFIX="-dev"
+          else
+            URL_SUFFIX=""
+          fi
+
+          BASE_URL="https://${{ secrets.MODAL_USERNAME }}--content-scraper-api-fastapi-app${URL_SUFFIX}.modal.run"
+          echo "base_url=$BASE_URL" >> $GITHUB_OUTPUT
+          echo "Using environment: $ENV"
+          echo "API URL: $BASE_URL"
+
+      - name: Fetch hooks documentation
+        id: fetch-hooks
+        run: |
+          # Call your Modal API endpoint
+          response=$(curl -s ${{ steps.set-env.outputs.base_url }}/hooks)
+
+          # Extract the content from the JSON response
+          content=$(echo "$response" | jq -r '.content')
+
+          # Save to a file
+          echo "$content" > docs/hooks.md
+
+      - name: Fetch other documentation (example)
+        id: fetch-other
+        run: |
+          # Generic endpoint example
+          response=$(curl -s -X POST \
+            ${{ steps.set-env.outputs.base_url }}/scrape \
+            -H "Content-Type: application/json" \
+            -d '{
+              "url": "https://code.claude.com/docs/en/slash-commands",
+              "selector": "#page-context-menu-button"
+            }')
+
+          content=$(echo "$response" | jq -r '.content')
+          echo "$content" > docs/slash-commands.md
+
+      - name: Check for changes
+        id: check-changes
+        run: |
+          git diff --quiet docs/ || echo "changes=true" >> $GITHUB_OUTPUT
+
+      - name: Commit and push changes
+        if: steps.check-changes.outputs.changes == 'true'
+        run: |
+          git config user.name "GitHub Actions Bot"
+          git config user.email "actions@github.com"
+          git add docs/*.md
+          git commit -m "chore: update documentation content [automated]"
+          git push
