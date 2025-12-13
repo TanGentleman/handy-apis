@@ -37,7 +37,7 @@ class ScrapeResponse(BaseModel):
     content_length: int
     url: str
     page_title: str
-    error: str = None
+    error: str | None = None
 
 
 async def scrape_and_copy(url: str, selector: str) -> dict:
