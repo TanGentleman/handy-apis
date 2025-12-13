@@ -228,7 +228,7 @@ async def get_hooks_docs():
 
 
 @app.function()
-@modal.asgi_app()
+@modal.asgi_app(requires_proxy_auth=True)
 def fastapi_app():
     """Mount the FastAPI app to Modal."""
     return web_app

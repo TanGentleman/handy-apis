@@ -54,6 +54,8 @@ jobs:
           response=$(curl -s -X POST \
             ${{ steps.set-env.outputs.base_url }}/scrape/batch \
             -H "Content-Type: application/json" \
+            -H "Modal-Key: ${{ secrets.MODAL_KEY }}" \
+            -H "Modal-Secret: ${{ secrets.MODAL_SECRET }}" \
             -d '{
               "requests": [
                 {
