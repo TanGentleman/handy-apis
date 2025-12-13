@@ -31,13 +31,26 @@ class ScrapeRequest(BaseModel):
     selector: str
 
 
+class BatchScrapeRequest(BaseModel):
+    requests: list[ScrapeRequest]
+
+
 class ScrapeResponse(BaseModel):
     success: bool
     content: str
     content_length: int
     url: str
     page_title: str
+    processing_time_seconds: float
     error: str | None = None
+
+
+class BatchScrapeResponse(BaseModel):
+    results: list[ScrapeResponse]
+    total: int
+    successful: int
+    failed: int
+    total_processing_time_seconds: float
 
 
 async def scrape_and_copy(url: str, selector: str) -> dict:
@@ -51,8 +64,10 @@ async def scrape_and_copy(url: str, selector: str) -> dict:
     Returns:
         Dictionary with content and metadata
     """
+    import time
     from playwright.async_api import async_playwright
 
+    start_time = time.time()
     try:
         async with async_playwright() as p:
             # Launch browser with clipboard permissions
@@ -88,22 +103,26 @@ async def scrape_and_copy(url: str, selector: str) -> dict:
             title = await page.title()
             await browser.close()
 
+            processing_time = time.time() - start_time
             return {
                 "success": True,
                 "content": clipboard_content,
                 "content_length": len(clipboard_content) if clipboard_content else 0,
                 "url": url,
                 "page_title": title,
+                "processing_time_seconds": processing_time,
                 "error": None
             }
 
     except Exception as e:
+        processing_time = time.time() - start_time
         return {
             "success": False,
             "content": "",
             "content_length": 0,
             "url": url,
             "page_title": "",
+            "processing_time_seconds": processing_time,
             "error": str(e)
         }
 
@@ -116,6 +135,7 @@ async def root():
         "version": "1.0",
         "endpoints": {
             "/scrape": "POST - Scrape content from any URL with a copy button",
+            "/scrape/batch": "POST - Scrape multiple URLs in parallel",
             "/hooks": "GET - Get Claude Code hooks documentation",
             "/health": "GET - Health check"
         }
@@ -141,6 +161,45 @@ async def scrape_content(request: ScrapeRequest):
     """
     result = await scrape_and_copy(request.url, request.selector)
     return ScrapeResponse(**result)
+
+
+@web_app.post("/scrape/batch", response_model=BatchScrapeResponse)
+async def scrape_batch(batch: BatchScrapeRequest):
+    """
+    Scrape multiple URLs in parallel.
+
+    Example request:
+    {
+        "requests": [
+            {"url": "https://code.claude.com/docs/en/hooks", "selector": "#page-context-menu-button"},
+            {"url": "https://code.claude.com/docs/en/slash-commands", "selector": "#page-context-menu-button"}
+        ]
+    }
+    """
+    import asyncio
+    import time
+
+    start_time = time.time()
+
+    # Run all scrapes in parallel
+    tasks = [
+        scrape_and_copy(req.url, req.selector)
+        for req in batch.requests
+    ]
+    results = await asyncio.gather(*tasks)
+
+    # Convert to response models
+    scrape_responses = [ScrapeResponse(**result) for result in results]
+
+    total_processing_time = time.time() - start_time
+
+    return BatchScrapeResponse(
+        results=scrape_responses,
+        total=len(scrape_responses),
+        successful=sum(1 for r in scrape_responses if r.success),
+        failed=sum(1 for r in scrape_responses if not r.success),
+        total_processing_time_seconds=total_processing_time
+    )
 
 
 @web_app.get("/hooks", response_model=ScrapeResponse)

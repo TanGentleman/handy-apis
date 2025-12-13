@@ -1,0 +1,105 @@
+# Test GitHub Workflow using the Batch Content Scraper API
+#
+# This workflow demonstrates parallel scraping of multiple documentation pages
+# using the /scrape/batch endpoint
+
+name: Batch Scraper Test
+
+on:
+  # Run manually with environment selection
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to use'
+        required: true
+        default: 'prod'
+        type: choice
+        options:
+          - prod
+          - dev
+
+jobs:
+  batch-scrape-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set environment variables
+        id: set-env
+        run: |
+          # Set environment (default to prod for manual runs)
+          ENV="${{ github.event.inputs.environment || 'prod' }}"
+          echo "environment=$ENV" >> $GITHUB_OUTPUT
+
+          # Construct URL based on environment
+          if [ "$ENV" = "dev" ]; then
+            URL_SUFFIX="-dev"
+          else
+            URL_SUFFIX=""
+          fi
+
+          BASE_URL="https://${{ secrets.MODAL_USERNAME }}--content-scraper-api-fastapi-app${URL_SUFFIX}.modal.run"
+          echo "base_url=$BASE_URL" >> $GITHUB_OUTPUT
+          echo "Using environment: $ENV"
+          echo "API URL: $BASE_URL"
+
+      - name: Batch scrape Claude documentation
+        id: batch-scrape
+        run: |
+          echo "Calling batch scrape endpoint..."
+
+          # Call the batch endpoint with multiple URLs
+          response=$(curl -s -X POST \
+            ${{ steps.set-env.outputs.base_url }}/scrape/batch \
+            -H "Content-Type: application/json" \
+            -d '{
+              "requests": [
+                {
+                  "url": "https://code.claude.com/docs/en/hooks",
+                  "selector": "#page-context-menu-button"
+                },
+                {
+                  "url": "https://code.claude.com/docs/en/slash-commands",
+                  "selector": "#page-context-menu-button"
+                }
+              ]
+            }')
+
+          # Display summary statistics
+          echo "Response received!"
+          echo "Total requests: $(echo "$response" | jq -r '.total')"
+          echo "Successful: $(echo "$response" | jq -r '.successful')"
+          echo "Failed: $(echo "$response" | jq -r '.failed')"
+          echo "Total processing time: $(echo "$response" | jq -r '.total_processing_time_seconds')s"
+
+          # Extract individual results
+          hooks_content=$(echo "$response" | jq -r '.results[0].content')
+          hooks_time=$(echo "$response" | jq -r '.results[0].processing_time_seconds')
+
+          slash_content=$(echo "$response" | jq -r '.results[1].content')
+          slash_time=$(echo "$response" | jq -r '.results[1].processing_time_seconds')
+
+          # Save to files
+          mkdir -p docs/claude
+          echo "$hooks_content" > docs/claude/hooks.md
+          echo "$slash_content" > docs/claude/slash-commands.md
+
+          # Display individual processing times
+          echo "Hooks documentation: ${hooks_time}s ($(echo "$hooks_content" | wc -c) chars)"
+          echo "Slash Commands documentation: ${slash_time}s ($(echo "$slash_content" | wc -c) chars)"
+
+      - name: Check for changes
+        id: check-changes
+        run: |
+          git diff --quiet docs/ || echo "changes=true" >> $GITHUB_OUTPUT
+
+      - name: Commit and push changes
+        if: steps.check-changes.outputs.changes == 'true'
+        run: |
+          git config user.name "GitHub Actions Bot"
+          git config user.email "actions@github.com"
+          git add docs/claude/*.md
+          git commit -m "chore: update documentation content via batch scraper [automated]"
+          git push
