@@ -1,0 +1,54 @@
+# Simple GitHub Workflow to update markdown files by fetching HTML directly
+name: Update Documentation Content (Simple)
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 0 * * *'  # Daily at midnight UTC
+
+jobs:
+  update-docs:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install HTML parsing tools
+        run: |
+          # Install pup for HTML parsing and pandoc for HTML to markdown conversion
+          sudo apt-get update
+          sudo apt-get install -y pandoc
+          wget https://github.com/ericchiang/pup/releases/download/v0.4.0/pup_v0.4.0_linux_amd64.zip
+          unzip pup_v0.4.0_linux_amd64.zip
+          sudo mv pup /usr/local/bin/
+          sudo chmod +x /usr/local/bin/pup
+
+      - name: Fetch Cursor hooks documentation
+        run: |
+          # Fetch the page and extract the main content div
+          curl -s "https://cursor.com/docs/agent/hooks" | \
+            pup 'div.prose json{}' | \
+            jq -r '.[0].text' > docs/cursor/hooks-raw.txt || \
+          # Fallback: Just convert the whole page
+          curl -s "https://cursor.com/docs/agent/hooks" | \
+            pandoc -f html -t markdown -o docs/cursor/hooks.md
+
+      - name: Fetch Claude hooks documentation
+        run: |
+          curl -s "https://code.claude.com/docs/en/hooks" | \
+            pandoc -f html -t markdown -o docs/claude/hooks.md
+
+      - name: Check for changes
+        id: check-changes
+        run: |
+          git diff --quiet docs/ || echo "changes=true" >> $GITHUB_OUTPUT
+
+      - name: Commit and push changes
+        if: steps.check-changes.outputs.changes == 'true'
+        run: |
+          git config user.name "GitHub Actions Bot"
+          git config user.email "actions@github.com"
+          git add docs/
+          git commit -m "chore: update documentation content via batch scraper [automated]"
+          git push
