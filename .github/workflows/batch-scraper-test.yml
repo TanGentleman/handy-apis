@@ -69,6 +69,10 @@ jobs:
                 {
                   "url": "https://cursor.com/docs/agent/hooks",
                   "selector": "//button[@type=\"button\"][.//span[text()=\"Copy page\"]]"
+                },
+                {
+                  "url": "https://docs.convex.dev/functions/http-actions",
+                  "selector": "//*[@id=\"__docusaurus_skipToContent_fallback\"]/div/div/main/div/div/div[1]/div/article/div[1]/button"
                 }
               ]
             }')
@@ -90,17 +94,23 @@ jobs:
           cursor_hooks_content=$(echo "$response" | jq -r '.results[2].content')
           cursor_hooks_time=$(echo "$response" | jq -r '.results[2].processing_time_seconds')
 
+          convex_http_content=$(echo "$response" | jq -r '.results[3].content')
+          convex_http_time=$(echo "$response" | jq -r '.results[3].processing_time_seconds')
+
           # Save to files
           mkdir -p docs/claude
           echo "$hooks_content" > docs/claude/hooks.md
           echo "$slash_content" > docs/claude/slash-commands.md
           mkdir -p docs/cursor
           echo "$cursor_hooks_content" > docs/cursor/hooks.md
+          mkdir -p docs/convex
+          echo "$convex_http_content" > docs/convex/http-actions.md
 
           # Display individual processing times
           echo "Claude Hooks documentation: ${hooks_time}s ($(echo "$hooks_content" | wc -c) chars)"
           echo "Claude Slash Commands documentation: ${slash_time}s ($(echo "$slash_content" | wc -c) chars)"
           echo "Cursor Hooks documentation: ${cursor_hooks_time}s ($(echo "$cursor_hooks_content" | wc -c) chars)"
+          echo "Convex HTTP Actions documentation: ${convex_http_time}s ($(echo "$convex_http_content" | wc -c) chars)"
 
       - name: Check for changes
         id: check-changes
@@ -112,6 +122,6 @@ jobs:
         run: |
           git config user.name "GitHub Actions Bot"
           git config user.email "actions@github.com"
-          git add docs/claude/*.md docs/cursor/*.md
+          git add docs/claude/*.md docs/cursor/*.md docs/convex/*.md
           git commit -m "chore: update documentation content via batch scraper [automated]"
           git push
