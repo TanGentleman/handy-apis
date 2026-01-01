@@ -206,16 +206,6 @@ async def cache_stats():
     cache = load_cache()
     return {"count": len(cache), "urls": list(cache.keys())}
 
-
-@web_app.delete("/cache")
-async def clear_cache():
-    import shutil
-    if CACHE.exists():
-        shutil.rmtree(CACHE)
-        volume.commit()
-    return {"status": "cleared"}
-
-
 @app.function(volumes={"/cache": volume})
 @modal.asgi_app(requires_proxy_auth=True)
 def fastapi_app():
