@@ -217,6 +217,6 @@ async def clear_cache():
 
 
 @app.function(volumes={"/cache": volume})
-@modal.asgi_app(requires_proxy_auth=False)
+@modal.asgi_app(requires_proxy_auth=True)
 def fastapi_app():
     return web_app
