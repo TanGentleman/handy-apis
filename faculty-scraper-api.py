@@ -34,10 +34,10 @@ def clean_text(text: str) -> str:
     """Remove HTML comments and normalize whitespace."""
     # Remove HTML comments
     text = re.sub(r'<!--.*?-->', '', text, flags=re.DOTALL)
-    # Normalize whitespace: collapse multiple spaces/newlines
-    text = re.sub(r'\n\s*\n', '\n', text)
-    text = re.sub(r'[ \t]+', ' ', text)
-    return text.strip()
+    # Split by lines, strip each, filter empty, rejoin
+    lines = [line.strip() for line in text.split('\n')]
+    lines = [line for line in lines if line]
+    return '\n'.join(lines)
 
 
 def parse_faculty_entry(raw_text: str) -> dict:
