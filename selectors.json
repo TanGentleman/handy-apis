@@ -1,0 +1,41 @@
+{
+  "sites": {
+    "unsloth": {
+      "baseUrl": "https://unsloth.ai/docs",
+      "pages": {
+        "qwen-image-2512": "/models/qwen-image-2512"
+      },
+      "selectors": {
+        "copyButton": "//button[@aria-label=\"Copy page\"]"
+      }
+    },
+    "claude-code": {
+      "baseUrl": "https://code.claude.com/docs/en",
+      "pages": {
+        "hooks": "/hooks",
+        "slash-commands": "/slash-commands"
+      },
+      "selectors": {
+        "copyButton": "#page-context-menu-button"
+      }
+    },
+    "cursor": {
+      "baseUrl": "https://cursor.com/docs",
+      "pages": {
+        "hooks": "/agent/hooks"
+      },
+      "selectors": {
+        "copyButton": "//button[@type=\"button\"][.//span[text()=\"Copy page\"]]"
+      }
+    },
+    "convex": {
+      "baseUrl": "https://docs.convex.dev",
+      "pages": {
+        "http-actions": "/functions/http-actions"
+      },
+      "selectors": {
+        "copyButton": "//*[@id=\"__docusaurus_skipToContent_fallback\"]/div/div/main/div/div/div[1]/div/article/div[1]/button"
+      }
+    }
+  }
+}
