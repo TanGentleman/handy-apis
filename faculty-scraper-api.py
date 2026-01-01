@@ -30,7 +30,7 @@ web_app = FastAPI()
 
 volume = modal.Volume.from_name("scraping-volume", create_if_missing=True)
 CACHE = Path("/cache")
-MAPPINGS = CACHE / "mappings.jsonl"
+MAPPINGS_DIR = CACHE / "mappings"
 CONTENTS = CACHE / "contents"
 
 BASE_URL = "https://bms.ucsf.edu/faculty"
@@ -40,13 +40,16 @@ SELECTOR = ".person-teaser__content"
 # --- Cache functions ---
 
 def load_cache() -> dict[str, dict]:
-    """Load URL -> {uuid, timestamp} mappings."""
+    """Load URL -> {uuid, timestamp} mappings from all mapping files."""
     cache = {}
-    if MAPPINGS.exists():
-        for line in MAPPINGS.read_text().strip().split("\n"):
-            if line:
-                entry = json.loads(line)
-                cache[entry["url"]] = entry
+    if MAPPINGS_DIR.exists():
+        for mapping_file in MAPPINGS_DIR.glob("*.jsonl"):
+            for line in mapping_file.read_text().strip().split("\n"):
+                if line:
+                    entry = json.loads(line)
+                    # Only keep the latest entry for each URL
+                    if entry["url"] not in cache or entry["timestamp"] > cache[entry["url"]]["timestamp"]:
+                        cache[entry["url"]] = entry
     return cache
 
 
@@ -64,16 +67,18 @@ def save_cache(url: str, entries: list[dict]):
     """Save parsed entries to cache."""
     CACHE.mkdir(exist_ok=True)
     CONTENTS.mkdir(exist_ok=True)
+    MAPPINGS_DIR.mkdir(exist_ok=True)
 
     entry_uuid = str(uuid.uuid4())
     (CONTENTS / f"{entry_uuid}.json").write_text(json.dumps(entries))
 
-    with open(MAPPINGS, "a") as f:
-        f.write(json.dumps({
-            "url": url,
-            "uuid": entry_uuid,
-            "timestamp": datetime.now().isoformat()
-        }) + "\n")
+    # Write to a new unique jsonl file to avoid concurrency issues
+    mapping_file = MAPPINGS_DIR / f"{entry_uuid}.jsonl"
+    mapping_file.write_text(json.dumps({
+        "url": url,
+        "uuid": entry_uuid,
+        "timestamp": datetime.now().isoformat()
+    }) + "\n")
 
 
 # --- Parsing functions ---
