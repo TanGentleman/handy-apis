@@ -3,7 +3,7 @@
 from .types import ScrapeJob, ScrapeResult, BatchConfig, ExtractFn, ParseFn
 from .extract import click_copy, text_content, inner_html, EXTRACTORS
 from .cache import ScrapeCache
-from .core import scrape, scrape_batch
+from .core import scrape, scrape_batch, get_links
 
 __all__ = [
     # Types
@@ -22,4 +22,5 @@ __all__ = [
     # Core
     "scrape",
     "scrape_batch",
+    "get_links",
 ]
