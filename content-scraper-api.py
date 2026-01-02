@@ -9,10 +9,10 @@ import time
 from pathlib import Path
 
 import modal
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
-from scraper import ScrapeJob, ScrapeResult, ScrapeCache, scrape
+from scraper import ScrapeJob, ScrapeResult, ScrapeCache, scrape, get_links
 
 playwright_image = modal.Image.debian_slim(python_version="3.10").run_commands(
     "apt-get update",
@@ -29,7 +29,6 @@ web_app = FastAPI(title="Content Scraper API")
 
 volume = modal.Volume.from_name("scraping-volume", create_if_missing=True)
 CACHE_PATH = Path("/cache")
-
 
 class ScrapeRequest(BaseModel):
     url: str
@@ -169,6 +168,15 @@ async def scrape_batch_endpoint(batch: BatchScrapeRequest):
         cached=sum(1 for r in responses if r.cached),
         total_processing_time_seconds=time.time() - start_time,
     )
+
+@web_app.post("/get_docs_links", response_model=dict)
+async def get_docs_links(request_dict: dict):
+    url = request_dict.get("url")
+    if not url:
+        raise HTTPException(status_code=400, detail="URL is required")
+    links = get_links(url)
+    docs_links = [link for link in links if "docs" in link]
+    return {"links": docs_links}
 
 
 @app.function(volumes={"/cache": volume})

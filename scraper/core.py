@@ -128,3 +128,16 @@ async def scrape_batch(
         for job in jobs
     ]
     return await asyncio.gather(*tasks)
+
+
+
+
+def get_all_links(url):
+    import re
+    import urllib.request
+    response = urllib.request.urlopen(url)
+    html = response.read().decode("utf8")
+    links = []
+    for match in re.finditer('href="(.*?)"', html):
+        links.append(match.group(1))
+    return links

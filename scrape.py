@@ -3,10 +3,28 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional
+from typing_extensions import TypedDict
 
 import requests
 from dotenv import load_dotenv
 
+def validate_api_url() -> str:
+    """Validate API URL and return it with the correct suffix."""
+    required = ["MODAL_USERNAME", "MODAL_KEY", "MODAL_SECRET"]
+    missing = [k for k in required if not os.environ.get(k)]
+    if missing:
+        raise ValueError(f"Missing required environment variables: {', '.join(missing)}")
+    
+    env = os.environ.get("ENVIRONMENT", "prod")
+    url_suffix = "-dev" if env == "dev" else ""
+    return f"https://{os.environ['MODAL_USERNAME']}--content-scraper-api-fastapi-app{url_suffix}.modal.run"
+
+def get_headers() -> Dict[str, str]:
+    return {
+        "Content-Type": "application/json",
+        "Modal-Key": os.environ.get("MODAL_KEY"),
+        "Modal-Secret": os.environ.get("MODAL_SECRET")
+    }
 
 @dataclass
 class PageInfo:
@@ -87,13 +105,8 @@ def batch_scrape(
     """Scrape all pages and return docs organized by site/page."""
     load_dotenv()
 
-    modal_username = os.environ.get("MODAL_USERNAME")
-    modal_key = os.environ.get("MODAL_KEY")
-    modal_secret = os.environ.get("MODAL_SECRET")
+    base_url = validate_api_url()
     env = os.environ.get("ENVIRONMENT", "prod")
-    url_suffix = "-dev" if env == "dev" else ""
-
-    base_url = f"https://{modal_username}--content-scraper-api-fastapi-app{url_suffix}.modal.run"
 
     if verbose:
         print(f"Using environment: {env}")
@@ -107,11 +120,7 @@ def batch_scrape(
 
     response = requests.post(
         f"{base_url}/scrape/batch",
-        headers={
-            "Content-Type": "application/json",
-            "Modal-Key": modal_key,
-            "Modal-Secret": modal_secret
-        },
+        headers=get_headers(),
         json={"requests": scrape_requests, "use_cache": use_cache}
     )
     
@@ -139,3 +148,18 @@ def batch_scrape(
                 print(f"  {site_name}/{page_name}: {res.get('processing_time_seconds', 0)}s ({len(content)} chars)")
     
     return docs
+
+def get_docs_links(url: str) -> List[str]:
+    """Get docs links from a URL."""
+    base_url = validate_api_url()
+    print(f"Base URL: {base_url}")
+    headers = get_headers()
+    response = requests.post(
+        f"{base_url}/get_docs_links",
+        headers=headers,
+        json={"url": url}
+    )
+    response_dict = response.json()
+    if "links" not in response_dict:
+        raise ValueError(f"Links not found in response: {response_dict}")
+    return response_dict["links"]
