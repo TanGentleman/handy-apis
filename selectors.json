@@ -1,7 +1,11 @@
 {
   "sites": {
     "unsloth": {
+      "name": "Unsloth",
       "baseUrl": "https://unsloth.ai/docs",
+      "sections": {
+        "models": "/models"
+      },
       "pages": {
         "qwen-image-2512": "/models/qwen-image-2512"
       },
@@ -11,7 +15,9 @@
       }
     },
     "claude-code": {
+      "name": "Claude Code",
       "baseUrl": "https://code.claude.com/docs/en",
+      "sections": {},
       "pages": {
         "hooks": "/hooks",
         "slash-commands": "/slash-commands"
@@ -22,7 +28,11 @@
       }
     },
     "cursor": {
+      "name": "Cursor",
       "baseUrl": "https://cursor.com/docs",
+      "sections": {
+        "agent": "/agent"
+      },
       "pages": {
         "hooks": "/agent/hooks"
       },
@@ -32,7 +42,11 @@
       }
     },
     "convex": {
+      "name": "Convex",
       "baseUrl": "https://docs.convex.dev",
+      "sections": {
+        "functions": "/functions"
+      },
       "pages": {
         "http-actions": "/functions/http-actions"
       },
@@ -42,9 +56,15 @@
       }
     },
     "modal": {
-      "baseUrl": "https://modal.com/docs/guide",
+      "name": "Modal",
+      "baseUrl": "https://modal.com/docs",
+      "sections": {
+        "guide": "/guide",
+        "reference": "/reference",
+        "examples": "/examples"
+      },
       "pages": {
-        "volumes": "/volumes"
+        "volumes": "/guide/volumes"
       },
       "selectors": {
         "copyButton": "//button[@title=\"Copy page\"]",

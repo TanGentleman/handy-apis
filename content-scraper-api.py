@@ -12,7 +12,7 @@ import modal
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
-from scraper import ScrapeJob, ScrapeResult, ScrapeCache, scrape, get_links
+from scraper import ScrapeJob, ScrapeResult, ScrapeCache, DocsCache, CollectionManager, scrape, get_links
 
 playwright_image = modal.Image.debian_slim(python_version="3.10").run_commands(
     "apt-get update",
@@ -22,13 +22,14 @@ playwright_image = modal.Image.debian_slim(python_version="3.10").run_commands(
     "pip install playwright==1.42.0",
     "playwright install-deps chromium",
     "playwright install chromium",
-).uv_pip_install("fastapi[standard]", "pydantic").add_local_python_source("scraper")
+).uv_pip_install("fastapi[standard]", "pydantic").add_local_python_source("scraper").add_local_file("selectors.json", "/app/selectors.json")
 
 app = modal.App("content-scraper-api", image=playwright_image)
 web_app = FastAPI(title="Content Scraper API")
 
 volume = modal.Volume.from_name("scraping-volume", create_if_missing=True)
 CACHE_PATH = Path("/cache")
+CONFIG_PATH = Path("/app/selectors.json")
 
 class ScrapeRequest(BaseModel):
     url: str
@@ -79,12 +80,16 @@ def result_to_response(result: ScrapeResult, processing_time: float) -> ScrapeRe
 async def root():
     return {
         "name": "Content Scraper API",
-        "version": "2.1",
+        "version": "2.2",
         "endpoints": {
             "/scrape": "POST - Scrape content from any URL",
             "/scrape/batch": "POST - Scrape multiple URLs in parallel",
             "/cache": "GET - View cache stats",
             "/health": "GET - Health check",
+            "/sites": "GET - List configured documentation sites",
+            "/docs/{site}": "GET - List cached pages for a site",
+            "/docs/{site}/{page}": "GET - Get cached documentation page",
+            "/docs/{site}/{page}/refresh": "POST - Scrape/refresh a documentation page",
         },
         "methods": ["click_copy", "text_content", "inner_html"],
     }
@@ -177,6 +182,99 @@ async def get_docs_links(request_dict: dict):
     links = get_links(url)
     docs_links = [link for link in links if "docs" in link]
     return {"links": docs_links}
+
+
+# --- Documentation Collection Endpoints ---
+
+@web_app.get("/sites")
+async def list_sites():
+    """List all configured documentation sites."""
+    manager = CollectionManager(CONFIG_PATH)
+    sites = {}
+    for site_id in manager.list_sites():
+        site = manager.get_site(site_id)
+        sites[site_id] = {
+            "name": site.name,
+            "base_url": site.base_url,
+            "sections": site.sections,
+            "pages": list(site.pages.keys()),
+        }
+    return {"sites": sites}
+
+
+@web_app.get("/docs/{site}")
+async def list_site_docs(site: str):
+    """List cached pages for a site and available pages from config."""
+    manager = CollectionManager(CONFIG_PATH)
+    docs_cache = DocsCache(CACHE_PATH)
+
+    try:
+        site_config = manager.get_site(site)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+    cached_pages = docs_cache.list_pages(site)
+    configured_pages = list(site_config.pages.keys())
+
+    return {
+        "site": site,
+        "name": site_config.name,
+        "cached_pages": cached_pages,
+        "configured_pages": configured_pages,
+        "cache_stats": docs_cache.stats(),
+    }
+
+
+@web_app.get("/docs/{site}/{page}")
+async def get_doc(site: str, page: str):
+    """Get cached documentation content for a site/page."""
+    docs_cache = DocsCache(CACHE_PATH)
+
+    content = docs_cache.get_content(site, page)
+    if content is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Page '{page}' not cached for site '{site}'. Use POST /docs/{site}/{page}/refresh to scrape it.",
+        )
+
+    metadata = docs_cache.get(site, page)
+    return {
+        "site": site,
+        "page": page,
+        "content": content,
+        "content_length": len(content),
+        "scraped_at": metadata.scraped_at.isoformat() if metadata else None,
+    }
+
+
+@web_app.post("/docs/{site}/{page}/refresh")
+async def refresh_doc(site: str, page: str):
+    """Scrape/refresh documentation for a site/page using selectors.json config."""
+    manager = CollectionManager(CONFIG_PATH)
+    docs_cache = DocsCache(CACHE_PATH)
+
+    try:
+        job = manager.create_job(site, page, use_cache=False)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+    start_time = time.time()
+    result = await scrape(job)
+
+    if not result.success:
+        raise HTTPException(status_code=500, detail=result.error or "Scraping failed")
+
+    content = "\n".join(str(e) for e in result.entries) if result.entries else ""
+    docs_cache.save(site, page, job.url, content)
+    volume.commit()
+
+    return {
+        "site": site,
+        "page": page,
+        "url": job.url,
+        "content_length": len(content),
+        "processing_time_seconds": time.time() - start_time,
+    }
 
 
 @app.function(volumes={"/cache": volume})
