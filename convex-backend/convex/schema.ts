@@ -2,13 +2,6 @@ import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 
 export default defineSchema({
-  // jobs - scrape jobs
-  jobs: defineTable({
-    url: v.string(),
-    status: v.union(v.literal("pending"), v.literal("completed"), v.literal("failed")),
-    isNew: v.boolean(),
-    metadata: v.any(),
-  }),
   // sites - documentation site configurations
   sites: defineTable({
     siteId: v.string(),
