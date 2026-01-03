@@ -2,96 +2,130 @@
 # deploy: true
 # ---
 
-# Content Scraper API - Unified scraping with pluggable extraction
-
-import asyncio
-import time
-from pathlib import Path
+# Content Scraper API - Stateless scraping with Convex storage
 
 import modal
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel
 
-from scraper import ScrapeJob, ScrapeResult, ScrapeCache, DocsCache, CollectionManager, scrape, get_links
+from scraper import ScrapeJob, ScrapeResult, scrape
 
-playwright_image = modal.Image.debian_slim(python_version="3.10").run_commands(
-    "apt-get update",
-    "apt-get install -y software-properties-common",
-    "apt-add-repository non-free",
-    "apt-add-repository contrib",
-    "pip install playwright==1.42.0",
-    "playwright install-deps chromium",
-    "playwright install chromium",
-).uv_pip_install("fastapi[standard]", "pydantic").add_local_python_source("scraper").add_local_file("selectors.json", "/app/selectors.json")
+playwright_image = (
+    modal.Image.debian_slim(python_version="3.10")
+    .run_commands(
+        "apt-get update",
+        "apt-get install -y software-properties-common",
+        "apt-add-repository non-free",
+        "apt-add-repository contrib",
+        "pip install playwright==1.42.0",
+        "playwright install-deps chromium",
+        "playwright install chromium",
+    )
+    .uv_pip_install("fastapi[standard]", "pydantic", "requests")
+    .add_local_python_source("scraper")
+)
 
 app = modal.App("content-scraper-api", image=playwright_image)
 web_app = FastAPI(title="Content Scraper API")
 
-volume = modal.Volume.from_name("scraping-volume", create_if_missing=True)
-CACHE_PATH = Path("/cache")
-CONFIG_PATH = Path("/app/selectors.json")
+CONVEX_API = "https://tangentleman--convex-api-fastapi-app-dev.modal.run"
+
 
 class ScrapeRequest(BaseModel):
     url: str
     selector: str
     method: str = "click_copy"
-    use_cache: bool = True
 
 
-class BatchScrapeRequest(BaseModel):
-    requests: list[ScrapeRequest]
-    use_cache: bool = True
+class TaskResponse(BaseModel):
+    task_id: str
+    site_id: str
+    page: str
 
 
-class ScrapeResponse(BaseModel):
-    success: bool
-    content: str
-    content_length: int
-    url: str
-    cached: bool = False
-    processing_time_seconds: float
-    error: str | None = None
+# --- Spawnable scrape task ---
 
 
-class BatchScrapeResponse(BaseModel):
-    results: list[ScrapeResponse]
-    total: int
-    successful: int
-    failed: int
-    cached: int
-    total_processing_time_seconds: float
+@app.function(timeout=300)
+async def scrape_and_save(site_id: str, page: str) -> dict:
+    """
+    Scrape a page using Convex site config and save result to Convex.
+    
+    This is the main workhorse - can be called directly or spawned for background processing.
+    
+    Usage:
+        # Direct call (blocking)
+        result = scrape_and_save.remote(site_id="modal", page="volumes")
+        
+        # Spawn (non-blocking)
+        call = scrape_and_save.spawn(site_id="modal", page="volumes")
+        result = call.get()  # Get result later
+    """
+    import requests
 
-
-def result_to_response(result: ScrapeResult, processing_time: float) -> ScrapeResponse:
-    """Convert ScrapeResult to API response format."""
-    content = "\n".join(str(e) for e in result.entries) if result.entries else ""
-    return ScrapeResponse(
-        success=result.success,
-        content=content,
-        content_length=len(content),
-        url=result.url,
-        cached=result.cached,
-        processing_time_seconds=processing_time,
-        error=result.error,
+    # 1. Get site config from Convex
+    resp = requests.get(f"{CONVEX_API}/sites/{site_id}")
+    if resp.status_code != 200:
+        return {"success": False, "error": f"Site not found: {site_id}"}
+    
+    site = resp.json()
+    
+    # 2. Build URL and scrape
+    page_path = site.get("pages", {}).get(page)
+    if not page_path:
+        return {"success": False, "error": f"Page '{page}' not in site config"}
+    
+    url = site["baseUrl"] + page_path
+    job = ScrapeJob(
+        name=page,
+        url=url,
+        selector=site["selector"],
+        method=site.get("method", "click_copy"),
     )
+    
+    result = await scrape(job)
+    
+    if not result.success:
+        return {"success": False, "error": result.error, "url": url}
+    
+    # 3. Save to Convex
+    content = "\n".join(str(e) for e in result.entries) if result.entries else ""
+    
+    save_resp = requests.post(
+        f"{CONVEX_API}/sites/{site_id}/docs/save",
+        json={"siteId": site_id, "page": page, "url": url, "markdown": content},
+    )
+    
+    if save_resp.status_code != 200:
+        return {"success": False, "error": f"Failed to save: {save_resp.text}", "url": url}
+    
+    return {
+        "success": True,
+        "site_id": site_id,
+        "page": page,
+        "url": url,
+        "content_length": len(content),
+        "content_hash": save_resp.json().get("contentHash"),
+    }
+
+
+# --- API Endpoints ---
 
 
 @web_app.get("/")
 async def root():
     return {
         "name": "Content Scraper API",
-        "version": "2.2",
+        "version": "3.0",
+        "convex_api": CONVEX_API,
         "endpoints": {
-            "/scrape": "POST - Scrape content from any URL",
-            "/scrape/batch": "POST - Scrape multiple URLs in parallel",
-            "/cache": "GET - View cache stats",
+            "/scrape": "POST - Scrape any URL (stateless)",
+            "/scrape/{site_id}/{page}": "POST - Scrape page & save to Convex",
+            "/scrape/{site_id}/{page}/spawn": "POST - Spawn background scrape task",
+            "/scrape/{site_id}": "POST - Scrape all pages for a site",
+            "/task/{task_id}": "GET - Check task status",
             "/health": "GET - Health check",
-            "/sites": "GET - List configured documentation sites",
-            "/docs/{site}": "GET - List cached pages for a site",
-            "/docs/{site}/{page}": "GET - Get cached documentation page",
-            "/docs/{site}/{page}/refresh": "POST - Scrape/refresh a documentation page",
         },
-        "methods": ["click_copy", "text_content", "inner_html"],
     }
 
 
@@ -100,184 +134,80 @@ async def health():
     return {"status": "healthy"}
 
 
-@web_app.get("/cache")
-async def cache_stats():
-    """Get cache statistics."""
-    cache = ScrapeCache(CACHE_PATH)
-    return cache.stats()
-
-
-@web_app.post("/scrape", response_model=ScrapeResponse)
-async def scrape_content(request: ScrapeRequest):
-    """Scrape a single URL."""
-    start_time = time.time()
-
-    cache = ScrapeCache(CACHE_PATH) if request.use_cache else None
-
-    job = ScrapeJob(
-        name="single",
-        url=request.url,
-        selector=request.selector,
-        method=request.method,
-        use_cache=request.use_cache,
-    )
-    result = await scrape(job, cache=cache)
-
-    if cache and not result.cached:
-        volume.commit()
-
-    return result_to_response(result, time.time() - start_time)
-
-
-@web_app.post("/scrape/batch", response_model=BatchScrapeResponse)
-async def scrape_batch_endpoint(batch: BatchScrapeRequest):
-    """Scrape multiple URLs in parallel."""
-    start_time = time.time()
-
-    cache = ScrapeCache(CACHE_PATH) if batch.use_cache else None
-
-    jobs = [
-        ScrapeJob(
-            name=f"batch_{i}",
-            url=req.url,
-            selector=req.selector,
-            method=req.method,
-            use_cache=batch.use_cache,
-        )
-        for i, req in enumerate(batch.requests)
-    ]
-
-    job_times = {}
-
-    async def timed_scrape(job: ScrapeJob) -> ScrapeResult:
-        job_start = time.time()
-        result = await scrape(job, cache=cache)
-        job_times[job.name] = time.time() - job_start
-        return result
-
-    results = await asyncio.gather(*[timed_scrape(job) for job in jobs])
-
-    if cache and any(not r.cached for r in results):
-        volume.commit()
-
-    responses = [
-        result_to_response(result, job_times.get(result.job_name, 0))
-        for result in results
-    ]
-
-    return BatchScrapeResponse(
-        results=responses,
-        total=len(responses),
-        successful=sum(1 for r in responses if r.success),
-        failed=sum(1 for r in responses if not r.success),
-        cached=sum(1 for r in responses if r.cached),
-        total_processing_time_seconds=time.time() - start_time,
-    )
-
-@web_app.post("/get_docs_links", response_model=dict)
-async def get_docs_links(request_dict: dict):
-    url = request_dict.get("url")
-    if not url:
-        raise HTTPException(status_code=400, detail="URL is required")
-    links = get_links(url)
-    docs_links = [link for link in links if "docs" in link]
-    return {"links": docs_links}
-
-
-# --- Documentation Collection Endpoints ---
-
-@web_app.get("/sites")
-async def list_sites():
-    """List all configured documentation sites."""
-    manager = CollectionManager(CONFIG_PATH)
-    sites = {}
-    for site_id in manager.list_sites():
-        site = manager.get_site(site_id)
-        sites[site_id] = {
-            "name": site.name,
-            "base_url": site.base_url,
-            "sections": site.sections,
-            "pages": list(site.pages.keys()),
-        }
-    return {"sites": sites}
-
-
-@web_app.get("/docs/{site}")
-async def list_site_docs(site: str):
-    """List cached pages for a site and available pages from config."""
-    manager = CollectionManager(CONFIG_PATH)
-    docs_cache = DocsCache(CACHE_PATH)
-
-    try:
-        site_config = manager.get_site(site)
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-
-    cached_pages = docs_cache.list_pages(site)
-    configured_pages = list(site_config.pages.keys())
-
+@web_app.post("/scrape")
+async def scrape_url(req: ScrapeRequest):
+    """Scrape any URL (stateless, no storage)."""
+    job = ScrapeJob(name="adhoc", url=req.url, selector=req.selector, method=req.method)
+    result = await scrape(job)
+    content = "\n".join(str(e) for e in result.entries) if result.entries else ""
     return {
-        "site": site,
-        "name": site_config.name,
-        "cached_pages": cached_pages,
-        "configured_pages": configured_pages,
-        "cache_stats": docs_cache.stats(),
-    }
-
-
-@web_app.get("/docs/{site}/{page}")
-async def get_doc(site: str, page: str):
-    """Get cached documentation content for a site/page."""
-    docs_cache = DocsCache(CACHE_PATH)
-
-    content = docs_cache.get_content(site, page)
-    if content is None:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Page '{page}' not cached for site '{site}'. Use POST /docs/{site}/{page}/refresh to scrape it.",
-        )
-
-    metadata = docs_cache.get(site, page)
-    return {
-        "site": site,
-        "page": page,
+        "success": result.success,
         "content": content,
         "content_length": len(content),
-        "scraped_at": metadata.scraped_at.isoformat() if metadata else None,
+        "url": result.url,
+        "error": result.error,
     }
 
 
-@web_app.post("/docs/{site}/{page}/refresh")
-async def refresh_doc(site: str, page: str):
-    """Scrape/refresh documentation for a site/page using selectors.json config."""
-    manager = CollectionManager(CONFIG_PATH)
-    docs_cache = DocsCache(CACHE_PATH)
+@web_app.post("/scrape/{site_id}/{page}")
+async def scrape_page(site_id: str, page: str):
+    """Scrape a page and save to Convex (blocking)."""
+    result = await scrape_and_save.local(site_id, page)
+    if not result["success"]:
+        raise HTTPException(status_code=500, detail=result.get("error"))
+    return result
 
-    try:
-        job = manager.create_job(site, page, use_cache=False)
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
 
-    start_time = time.time()
-    result = await scrape(job)
+@web_app.post("/scrape/{site_id}/{page}/spawn", response_model=TaskResponse)
+async def spawn_scrape(site_id: str, page: str):
+    """Spawn a background scrape task. Returns task_id for polling."""
+    call = scrape_and_save.spawn(site_id, page)
+    return TaskResponse(task_id=call.object_id, site_id=site_id, page=page)
 
-    if not result.success:
-        raise HTTPException(status_code=500, detail=result.error or "Scraping failed")
 
-    content = "\n".join(str(e) for e in result.entries) if result.entries else ""
-    docs_cache.save(site, page, job.url, content)
-    volume.commit()
-
+@web_app.post("/scrape/{site_id}")
+async def scrape_site(site_id: str, pages: list[str] = Query(default=None)):
+    """Scrape all (or specified) pages for a site."""
+    import requests
+    
+    # Get site config
+    resp = requests.get(f"{CONVEX_API}/sites/{site_id}")
+    if resp.status_code != 200:
+        raise HTTPException(status_code=404, detail=f"Site not found: {site_id}")
+    
+    site = resp.json()
+    target_pages = pages or list(site.get("pages", {}).keys())
+    
+    results = []
+    for page in target_pages:
+        result = await scrape_and_save.local(site_id, page)
+        results.append(result)
+    
     return {
-        "site": site,
-        "page": page,
-        "url": job.url,
-        "content_length": len(content),
-        "processing_time_seconds": time.time() - start_time,
+        "site_id": site_id,
+        "results": results,
+        "total": len(results),
+        "successful": sum(1 for r in results if r.get("success")),
+        "failed": sum(1 for r in results if not r.get("success")),
     }
 
 
-@app.function(volumes={"/cache": volume})
+@web_app.get("/task/{task_id}")
+async def get_task_status(task_id: str):
+    """Check status of a spawned task."""
+    from modal.functions import FunctionCall
+
+    call = FunctionCall.from_id(task_id)
+    try:
+        result = call.get(timeout=0)  # Non-blocking check
+        return {"status": "completed", "result": result}
+    except TimeoutError:
+        return {"status": "running", "task_id": task_id}
+    except Exception as e:
+        return {"status": "failed", "error": str(e)}
+
+
+@app.function()
 @modal.asgi_app(requires_proxy_auth=True)
 def fastapi_app():
     return web_app
