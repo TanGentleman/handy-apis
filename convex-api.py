@@ -22,9 +22,10 @@ app = modal.App("convex-api", image=image)
 web_app = FastAPI(title="Convex Data Store API")
 
 # Convex configuration
-CONVEX_URL = os.environ.get("CONVEX_URL", "")
-if not CONVEX_URL:
-    raise ValueError("CONVEX_URL environment variable is required")
+def get_convex_url() -> str:
+    if not os.environ.get("CONVEX_URL"):
+        raise ValueError("CONVEX_URL environment variable is required")
+    return os.environ["CONVEX_URL"]
 
 # Request/Response Models
 
@@ -64,7 +65,7 @@ class DocListResponse(BaseModel):
 
 async def convex_query(function_path: str, args: dict = None) -> Any:
     """Call a Convex query function."""
-    url = f"{CONVEX_URL}/api/query"
+    url = f"{get_convex_url()}/api/query"
     payload = {
         "path": function_path,
         "args": args or {},
@@ -84,7 +85,7 @@ async def convex_query(function_path: str, args: dict = None) -> Any:
 
 async def convex_mutation(function_path: str, args: dict) -> Any:
     """Call a Convex mutation function."""
-    url = f"{CONVEX_URL}/api/mutation"
+    url = f"{get_convex_url()}/api/mutation"
     payload = {
         "path": function_path,
         "args": args,
@@ -129,7 +130,7 @@ async def root():
 @web_app.get("/health")
 async def health():
     """Health check."""
-    return {"status": "healthy", "convex_url": CONVEX_URL}
+    return {"status": "healthy", "convex_url": get_convex_url()}
 
 
 # --- Site Endpoints ---
@@ -273,4 +274,10 @@ async def get_doc_by_url(url: str):
 )
 @modal.asgi_app()
 def fastapi_app():
+    convex_url = get_convex_url()
+    print(f"Convex backend is running at {convex_url}")
+    # response = httpx.get(convex_url)
+    # response.raise_for_status()
+    # if not response.text.startswith("This Convex deployment is running"):
+    #     print(f"Convex backend is not running at {convex_url}")
     return web_app
