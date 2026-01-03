@@ -16,6 +16,7 @@ export const listBySite = query({
       page: doc.page,
       url: doc.url,
       contentHash: doc.contentHash,
+      createdAt: doc._creationTime,
       updatedAt: doc.updatedAt,
       contentLength: doc.markdown.length,
     }));
@@ -47,6 +48,7 @@ export const get = query({
       url: doc.url,
       markdown: doc.markdown,
       contentHash: doc.contentHash,
+      createdAt: doc._creationTime,
       updatedAt: doc.updatedAt,
     };
   },
@@ -72,6 +74,7 @@ export const getByUrl = query({
       url: doc.url,
       markdown: doc.markdown,
       contentHash: doc.contentHash,
+      createdAt: doc._creationTime,
       updatedAt: doc.updatedAt,
     };
   },

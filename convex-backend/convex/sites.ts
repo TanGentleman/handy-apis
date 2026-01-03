@@ -14,6 +14,7 @@ export const list = query({
       method: site.method,
       pages: site.pages,
       sections: site.sections,
+      createdAt: site._creationTime,
     }));
   },
 });
@@ -40,6 +41,7 @@ export const get = query({
       method: site.method,
       pages: site.pages,
       sections: site.sections,
+      createdAt: site._creationTime,
     };
   },
 });
