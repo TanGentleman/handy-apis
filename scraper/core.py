@@ -4,6 +4,25 @@ from .types import ScrapeJob, ScrapeResult, ExtractFn, ParseFn
 from .extract import EXTRACTORS
 
 
+async def _save_debug_output(page, job: ScrapeJob) -> None:
+    """Save debug HTML and screenshot if paths are configured."""
+    if job.debug_html_path:
+        try:
+            html_content = await page.content()
+            with open(job.debug_html_path, "w", encoding="utf-8") as f:
+                f.write(html_content)
+            print(f"Debug HTML saved to: {job.debug_html_path}")
+        except Exception as html_err:
+            print(f"Failed to save debug HTML: {html_err}")
+
+    if job.debug_screenshot_path:
+        try:
+            await page.screenshot(path=job.debug_screenshot_path, full_page=True)
+            print(f"Debug screenshot saved to: {job.debug_screenshot_path}")
+        except Exception as ss_err:
+            print(f"Failed to save debug screenshot: {ss_err}")
+
+
 async def scrape(
     job: ScrapeJob,
     parse_fn: ParseFn | None = None,
@@ -26,21 +45,23 @@ async def scrape(
     print(f"Scraping: {job.url}")
     from playwright.async_api import async_playwright
 
-    try:
-        async with async_playwright() as p:
-            browser = await p.chromium.launch()
-            if job.method == "click_copy":
-                permissions = ["clipboard-read", "clipboard-write"]
-            else:
-                permissions = []
-            context = await browser.new_context(permissions=permissions)
-            page = await context.new_page()
+    async with async_playwright() as p:
+        browser = await p.chromium.launch()
+        if job.method == "click_copy":
+            permissions = ["clipboard-read", "clipboard-write"]
+        else:
+            permissions = []
+        context = await browser.new_context(permissions=permissions)
+        page = await context.new_page()
 
+        try:
             await page.goto(job.url, wait_until=job.wait_until, timeout=job.timeout)
-            await page.wait_for_selector(job.selector, state="visible", timeout=job.timeout)
+
+            # Skip wait_for_selector for custom methods - they handle their own waiting
+            if job.method != "custom":
+                await page.wait_for_selector(job.selector, state="visible", timeout=job.timeout)
 
             raw_entries = await extract_fn(page, job.selector)
-            await browser.close()
 
             # Parse if function provided, otherwise keep raw strings
             if parse_fn:
@@ -50,6 +71,7 @@ async def scrape(
 
             if len(entries) == 0:
                 print(f"No entries found for {job.url}")
+                await _save_debug_output(page, job)
                 return ScrapeResult(
                     job_name=job.name,
                     url=job.url,
@@ -66,15 +88,16 @@ async def scrape(
                 entries=entries,
             )
 
-    except Exception as e:
-        print(f"Error scraping {job.url}: {e}")
-        return ScrapeResult(
-            job_name=job.name,
-            url=job.url,
-            success=False,
-            entries=[],
-            error=str(e),
-        )
+        except Exception as e:
+            print(f"Error scraping {job.url}: {e}")
+            await _save_debug_output(page, job)
+            return ScrapeResult(
+                job_name=job.name,
+                url=job.url,
+                success=False,
+                entries=[],
+                error=str(e),
+            )
 
 
 async def scrape_batch(

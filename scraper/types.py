@@ -18,6 +18,8 @@ class ScrapeJob(BaseModel):
     method: ExtractMethod = "text_content"
     timeout: int = 30000
     wait_until: Literal["load", "domcontentloaded", "networkidle"] = "networkidle"
+    debug_html_path: str | None = None
+    debug_screenshot_path: str | None = None
 
     class Config:
         extra = "allow"
