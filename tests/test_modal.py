@@ -2,6 +2,7 @@ import json
 import os
 import time
 import asyncio
+from pathlib import Path
 import httpx
 from dotenv import load_dotenv
 
@@ -61,7 +62,7 @@ async def add_pages_to_site(pages_dict: dict[str, str], site_id: str = "modal") 
 
 async def scrape_modal_links(limit: int = 5):
     """Read modal_links.json and spawn scrape jobs for all links."""
-    with open("modal_links.json", "r") as f:
+    with open(Path(__file__).parent.parent / "data" / "modal_links.json", "r") as f:
         data = json.load(f)
     
     links = data.get("modal_links", [])[:limit]
