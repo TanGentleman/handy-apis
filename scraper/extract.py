@@ -27,6 +27,45 @@ async def terraform_registry(page: Page, selector: str) -> list[str]:
     return results
 
 
+async def terraform_links(page: Page, selector: str) -> list[str]:
+    """
+    Extract all documentation links from Terraform Registry.
+
+    Handles cookie consent and JS rendering, then extracts all hrefs
+    that match the base docs URL pattern. The selector parameter is used
+    as the base URL prefix to filter links.
+    """
+    # Handle cookie consent banner if present
+    try:
+        accept_button = page.locator('button:has-text("Accept All")')
+        await accept_button.wait_for(state="visible", timeout=5000)
+        await accept_button.click()
+        await page.wait_for_timeout(1000)
+    except Exception:
+        pass  # No cookie banner or already dismissed
+
+    # Wait for the main content to render
+    await page.wait_for_selector("#provider-docs-content", state="visible", timeout=30000)
+    await page.wait_for_timeout(2000)  # Extra time for JS to settle
+
+    # Extract all links from the page
+    links = await page.eval_on_selector_all(
+        "a[href]",
+        "elements => elements.map(e => e.href)"
+    )
+
+    # Filter to only include links that extend the base docs URL (passed as selector)
+    base_url = selector  # Repurpose selector as the base URL filter
+    results = set()
+    for link in links:
+        # Remove query params and fragments
+        clean_link = link.split("?")[0].split("#")[0].rstrip("/")
+        if clean_link.startswith(base_url):
+            results.add(clean_link)
+
+    return sorted(results)
+
+
 async def click_copy(page: Page, selector: str) -> list[str]:
     """Click a copy button and read clipboard content."""
     await page.click(selector)
@@ -70,4 +109,5 @@ EXTRACTORS = {
     "text_content": text_content,
     "inner_html": inner_html,
     "terraform_registry": terraform_registry,
+    "terraform_links": terraform_links,
 }

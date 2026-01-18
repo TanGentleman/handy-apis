@@ -58,7 +58,7 @@ async def scrape(
             await page.goto(job.url, wait_until=job.wait_until, timeout=job.timeout)
 
             # Skip wait_for_selector for methods that handle their own waiting
-            if job.method not in ("custom", "terraform_registry"):
+            if job.method not in ("custom", "terraform_registry", "terraform_links"):
                 await page.wait_for_selector(job.selector, state="visible", timeout=job.timeout)
 
             raw_entries = await extract_fn(page, job.selector)

@@ -7,7 +7,7 @@ from playwright.async_api import Page
 # Type aliases
 ExtractFn = Callable[[Page, str], Awaitable[list[str]]]
 ParseFn = Callable[[str], dict]
-ExtractMethod = Literal["click_copy", "text_content", "inner_html", "terraform_registry", "custom"]
+ExtractMethod = Literal["click_copy", "text_content", "inner_html", "terraform_registry", "terraform_links", "custom"]
 
 
 class ScrapeJob(BaseModel):

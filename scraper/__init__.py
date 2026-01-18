@@ -1,7 +1,7 @@
 """Scraper module - stateless scraping with pluggable extraction."""
 
 from .models import ScrapeJob, ScrapeResult, ExtractFn, ParseFn
-from .extract import click_copy, text_content, inner_html, EXTRACTORS
+from .extract import click_copy, text_content, inner_html, terraform_links, EXTRACTORS
 from .core import scrape, scrape_batch
 
 __all__ = [
@@ -14,6 +14,7 @@ __all__ = [
     "click_copy",
     "text_content",
     "inner_html",
+    "terraform_links",
     "EXTRACTORS",
     # Core
     "scrape",
