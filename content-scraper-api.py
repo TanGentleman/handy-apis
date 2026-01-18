@@ -38,6 +38,8 @@ class ScrapeRequest(BaseModel):
     url: str
     selector: str
     method: str = "click_copy"
+    timeout: int = 30000
+    wait_until: str = "networkidle"
 
 
 class TaskResponse(BaseModel):
@@ -235,7 +237,14 @@ async def spawn_doc_refresh(
 @web_app.post("/scrape")
 async def scrape_url(req: ScrapeRequest):
     """Scrape any URL (stateless, no storage)."""
-    job = ScrapeJob(name="adhoc", url=req.url, selector=req.selector, method=req.method)
+    job = ScrapeJob(
+        name="adhoc",
+        url=req.url,
+        selector=req.selector,
+        method=req.method,
+        timeout=req.timeout,
+        wait_until=req.wait_until,
+    )
     result = await scrape(job)
     content = "\n".join(str(e) for e in result.entries) if result.entries else ""
     return {
