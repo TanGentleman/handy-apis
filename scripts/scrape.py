@@ -36,7 +36,7 @@ class PageInfo:
 
 def load_selectors_data() -> Dict:
     """Load selectors data from JSON file."""
-    with open(Path(__file__).parent / "selectors.json") as f:
+    with open(Path(__file__).parent.parent / "data" / "selectors.json") as f:
         return json.load(f)
 
 
