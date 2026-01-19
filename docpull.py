@@ -1,0 +1,108 @@
+#!/usr/bin/env python3
+"""CLI tool to fetch documentation from the content-scraper API."""
+
+import sys
+import os
+import httpx
+from dotenv import load_dotenv
+
+load_dotenv()
+
+API_BASE = os.environ.get(
+    "SCRAPER_API_URL",
+    "https://tangentleman--content-scraper-api-fastapi-app-dev.modal.run"
+)
+
+
+def get_auth_headers() -> dict:
+    key = os.environ.get("MODAL_KEY")
+    secret = os.environ.get("MODAL_SECRET")
+    if key and secret:
+        return {"Modal-Key": key, "Modal-Secret": secret}
+    return {}
+
+
+def cmd_sites():
+    """List all available site IDs."""
+    resp = httpx.get(f"{API_BASE}/sites", headers=get_auth_headers())
+    resp.raise_for_status()
+    sites = resp.json()["sites"]
+    for s in sites:
+        print(s)
+
+
+def cmd_links(site_id: str):
+    """Get all documentation links for a site."""
+    resp = httpx.get(
+        f"{API_BASE}/sites/{site_id}/links",
+        headers=get_auth_headers(),
+        timeout=120.0,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    for link in data["links"]:
+        print(link)
+    print(f"\nTotal: {data['count']} links", file=sys.stderr)
+
+
+def cmd_content(site_id: str, path: str):
+    """Get content from a specific page path."""
+    resp = httpx.get(
+        f"{API_BASE}/sites/{site_id}/content",
+        params={"path": path},
+        headers=get_auth_headers(),
+        timeout=120.0,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+
+    # Sanitize path for filename
+    safe_path = path.strip("/").replace("/", "_") or "index"
+    out_dir = f"./docs/{site_id}"
+    os.makedirs(out_dir, exist_ok=True)
+    out_path = f"{out_dir}/{safe_path}.md"
+
+    with open(out_path, "w") as f:
+        f.write(data["content"])
+
+    print(f"Saved to {out_path} ({data['content_length']} chars)")
+
+
+def print_usage():
+    print("""Usage: docpull <command> [args]
+
+Commands:
+  sites                     List all available site IDs
+  links <site_id>           Get all doc links for a site
+  content <site_id> <path>  Get content from a specific page path
+
+Examples:
+  docpull sites
+  docpull links terraform-aws
+  docpull content modal /guide
+  docpull content terraform-aws /resources/aws_instance
+""")
+
+
+def main():
+    if len(sys.argv) < 2:
+        print_usage()
+        sys.exit(1)
+
+    cmd = sys.argv[1]
+
+    if cmd == "sites":
+        cmd_sites()
+    elif cmd == "links" and len(sys.argv) >= 3:
+        cmd_links(sys.argv[2])
+    elif cmd == "content" and len(sys.argv) >= 4:
+        cmd_content(sys.argv[2], sys.argv[3])
+    elif cmd in ("--help", "-h", "help"):
+        print_usage()
+    else:
+        print_usage()
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
