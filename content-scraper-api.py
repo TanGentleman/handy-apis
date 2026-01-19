@@ -25,6 +25,7 @@ playwright_image = (
     )
     .uv_pip_install("fastapi[standard]", "pydantic", "requests", "httpx")
     .add_local_python_source("scraper")
+    .add_local_dir("scraper/config", remote_path="/root/scraper/config")
 )
 
 app = modal.App("content-scraper-api", image=playwright_image)
