@@ -45,11 +45,15 @@ def cmd_links(site_id: str):
     print(f"\nTotal: {data['count']} links", file=sys.stderr)
 
 
-def cmd_content(site_id: str, path: str):
+def cmd_content(site_id: str, path: str, force: bool = False):
     """Get content from a specific page path."""
+    params = {"path": path}
+    if force:
+        params["max_age"] = 0  # Force fresh scrape
+
     resp = httpx.get(
         f"{API_BASE}/sites/{site_id}/content",
-        params={"path": path},
+        params=params,
         headers=get_auth_headers(),
         timeout=120.0,
     )
@@ -65,21 +69,24 @@ def cmd_content(site_id: str, path: str):
     with open(out_path, "w") as f:
         f.write(data["content"])
 
-    print(f"Saved to {out_path} ({data['content_length']} chars)")
+    cache_status = "(cached)" if data.get("from_cache") else "(fresh)"
+    print(f"Saved to {out_path} ({data['content_length']} chars) {cache_status}")
 
 
 def print_usage():
     print("""Usage: docpull <command> [args]
 
 Commands:
-  sites                     List all available site IDs
-  links <site_id>           Get all doc links for a site
-  content <site_id> <path>  Get content from a specific page path
+  sites                            List all available site IDs
+  links <site_id>                  Get all doc links for a site
+  content <site_id> <path>         Get content (uses cache if <1hr old)
+  content <site_id> <path> --force Force fresh scrape, ignore cache
 
 Examples:
   docpull sites
   docpull links terraform-aws
   docpull content modal /guide
+  docpull content modal /guide --force
   docpull content terraform-aws /resources/aws_instance
 """)
 
@@ -96,7 +103,8 @@ def main():
     elif cmd == "links" and len(sys.argv) >= 3:
         cmd_links(sys.argv[2])
     elif cmd == "content" and len(sys.argv) >= 4:
-        cmd_content(sys.argv[2], sys.argv[3])
+        force = "--force" in sys.argv
+        cmd_content(sys.argv[2], sys.argv[3], force=force)
     elif cmd in ("--help", "-h", "help"):
         print_usage()
     else:
