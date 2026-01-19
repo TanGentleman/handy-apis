@@ -1,58 +1,63 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Documentation scraper with caching. Fetches docs from various sites and saves locally.
 
-## Project Overview
+## docpull CLI
 
-Modal-based serverless API endpoints for web automation and scraping. The primary application uses Playwright for browser automation to extract content from websites.
-
-## Technology Stack
-
-- **Modal**: Serverless deployment platform
-- **FastAPI**: Web framework
-- **Playwright**: Browser automation
-- **Python 3.12+**: Required version
-- **uv**: Package manager
-
-## Essential Commands
-
-### Setup
 ```bash
-uv sync
+# List available sites
+python docpull.py sites
+
+# Get all doc links for a site
+python docpull.py links modal
+python docpull.py links terraform-aws
+
+# Fetch content (cached for 1 hour)
+python docpull.py content modal /guide
+
+# Force fresh scrape
+python docpull.py content modal /guide --force
 ```
 
-### Deployment
+Output saved to `./docs/<site>/<path>.md`
+
+## Adding a New Site
+
+1. Add config to `scraper/config/sites.json`:
+```json
+{
+  "new-site": {
+    "name": "New Site",
+    "baseUrl": "https://docs.example.com",
+    "mode": "fetch",
+    "extractor": "default",
+    "links": {
+      "startUrls": [""],
+      "pattern": "docs.example.com",
+      "maxDepth": 2
+    },
+    "content": {
+      "mode": "browser",
+      "selector": "#copy-button",
+      "method": "click_copy"
+    }
+  }
+}
+```
+
+2. If custom logic needed, create `scraper/extractors/new_site.py` and import in `scraper/extractors/__init__.py`
+
+## Key Files
+
+- `docpull.py` - CLI client
+- `content-scraper-api.py` - Modal API (deploy this)
+- `scraper/config/sites.json` - Site definitions
+- `scraper/extractors/` - Site-specific scraping logic
+
+## Commands
+
 ```bash
-# Assume the hot-reloading dev server is active du during development
-modal serve <filename>.py
+uv sync                                    # Install deps
+modal serve content-scraper-api.py         # Dev server (hot reload)
+python tests/test_modal.py                 # Test API
 ```
-
-## Architecture
-
-### Modal Application Pattern
-
-Applications follow Modal's serverless architecture:
-
-1. **Custom Image**: Debian slim base with system dependencies and Python packages installed via `.run_commands()` and `.uv_pip_install()`
-2. **App Definition**: Modal App with descriptive name
-3. **ASGI Integration**: FastAPI apps mounted via `@modal.asgi_app()` decorator
-4. **Deploy Marker**: `# deploy: true` comment at top of file
-
-### Browser Automation
-
-- Headless Chromium with custom permissions (clipboard access)
-- Async operations using Playwright's async API
-- Structured error handling with consistent response schemas
-
-### GitHub Actions Integration
-
-Workflows can call deployed Modal endpoints to automate content updates. API URLs follow the pattern:
-```
-https://[MODAL_USERNAME]--[app-name]-[function-name][-dev].modal.run
-```
-
-The `-dev` suffix is added for development deployments.
-
-## Future Considerations
-
-Authentication will be added to endpoints, which will require authentication tokens in deployment commands and API requests.
