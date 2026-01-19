@@ -1,0 +1,105 @@
+{
+  "sites": {
+    "modal": {
+      "name": "Modal",
+      "baseUrl": "https://modal.com/docs",
+      "mode": "fetch",
+      "extractor": "modal",
+      "links": {
+        "startUrls": ["/guide", "/reference", "/examples"],
+        "pattern": "/docs",
+        "maxDepth": 2
+      },
+      "content": {
+        "mode": "browser",
+        "waitFor": "//button[@title=\"Copy page\"]",
+        "selector": "//button[@title=\"Copy page\"]",
+        "method": "click_copy"
+      }
+    },
+    "convex": {
+      "name": "Convex",
+      "baseUrl": "https://docs.convex.dev",
+      "mode": "fetch",
+      "extractor": "convex",
+      "links": {
+        "startUrls": ["", "/functions", "/database", "/auth", "/file-storage", "/scheduling", "/search", "/client", "/api"],
+        "pattern": "docs.convex.dev",
+        "maxDepth": 2
+      },
+      "content": {
+        "mode": "browser",
+        "waitFor": "//*[@id=\"__docusaurus_skipToContent_fallback\"]/div/div/main/div/div/div[1]/div/article/div[1]/button",
+        "selector": "//*[@id=\"__docusaurus_skipToContent_fallback\"]/div/div/main/div/div/div[1]/div/article/div[1]/button",
+        "method": "click_copy"
+      }
+    },
+    "terraform-aws": {
+      "name": "Terraform AWS Provider",
+      "baseUrl": "https://registry.terraform.io/providers/hashicorp/aws/latest/docs",
+      "mode": "browser",
+      "extractor": "terraform",
+      "links": {
+        "startUrls": [""],
+        "pattern": "registry.terraform.io/providers/hashicorp/aws/latest/docs",
+        "waitFor": "#provider-docs-content"
+      },
+      "content": {
+        "waitFor": "#provider-docs-content",
+        "selector": "#provider-docs-content",
+        "method": "inner_html"
+      }
+    },
+    "cursor": {
+      "name": "Cursor",
+      "baseUrl": "https://docs.cursor.com",
+      "mode": "fetch",
+      "extractor": "cursor",
+      "links": {
+        "startUrls": ["", "/get-started", "/tab", "/chat", "/agent", "/context", "/settings"],
+        "pattern": "docs.cursor",
+        "maxDepth": 2
+      },
+      "content": {
+        "mode": "browser",
+        "waitFor": "//button[@type=\"button\"][.//span[text()=\"Copy page\"]]",
+        "selector": "//button[@type=\"button\"][.//span[text()=\"Copy page\"]]",
+        "method": "click_copy"
+      }
+    },
+    "claude-code": {
+      "name": "Claude Code",
+      "baseUrl": "https://docs.anthropic.com/en/docs/claude-code",
+      "mode": "fetch",
+      "extractor": "claude_code",
+      "links": {
+        "startUrls": [""],
+        "pattern": "claude-code",
+        "maxDepth": 2
+      },
+      "content": {
+        "mode": "browser",
+        "waitFor": "#page-context-menu-button",
+        "selector": "#page-context-menu-button",
+        "method": "click_copy"
+      }
+    },
+    "unsloth": {
+      "name": "Unsloth",
+      "baseUrl": "https://docs.unsloth.ai",
+      "mode": "fetch",
+      "extractor": "unsloth",
+      "links": {
+        "startUrls": ["", "/basics", "/tutorials", "/models"],
+        "pattern": "docs.unsloth",
+        "maxDepth": 2
+      },
+      "content": {
+        "mode": "browser",
+        "waitFor": "//button[@aria-label=\"Copy page\"]",
+        "selector": "//button[@aria-label=\"Copy page\"]",
+        "method": "click_copy"
+      }
+    }
+  }
+}
