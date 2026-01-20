@@ -9,7 +9,7 @@
       "links": {
         "startUrls": ["/guide", "/reference", "/examples"],
         "pattern": "/docs",
-        "maxDepth": 2
+        "maxDepth": 1
       },
       "content": {
         "mode": "browser",
@@ -24,8 +24,8 @@
       "mode": "fetch",
       "extractor": "convex",
       "links": {
-        "startUrls": ["", "/functions", "/database", "/auth", "/file-storage", "/scheduling", "/search", "/client", "/api"],
-        "pattern": "docs.convex.dev",
+        "startUrls": ["/home"],
+        "pattern": "docs.convex.dev/",
         "maxDepth": 2
       },
       "content": {

@@ -282,7 +282,6 @@
     "https://docs.convex.dev/testing/ci",
     "https://docs.convex.dev/testing/convex-backend",
     "https://docs.convex.dev/testing/convex-test",
-    "https://docs.convex.dev/text-search",
     "https://docs.convex.dev/tutorial",
     "https://docs.convex.dev/tutorial/actions",
     "https://docs.convex.dev/tutorial/reactor",
@@ -291,14 +290,10 @@
     "https://docs.convex.dev/understanding/best-practices",
     "https://docs.convex.dev/understanding/best-practices/other-recommendations",
     "https://docs.convex.dev/understanding/best-practices/typescript",
-    "https://docs.convex.dev/understanding/convex-fundamentals/functions",
     "https://docs.convex.dev/understanding/workflow",
     "https://docs.convex.dev/understanding/zen",
     "https://docs.convex.dev/using/cli",
-    "https://docs.convex.dev/using/database-queries",
-    "https://docs.convex.dev/using/indexes",
     "https://docs.convex.dev/using/optimistic-updates",
-    "https://docs.convex.dev/using/types",
-    "https://docs.convex.dev/vector-search"
+    "https://docs.convex.dev/using/types"
   ]
 }
