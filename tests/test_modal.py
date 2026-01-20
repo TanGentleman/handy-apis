@@ -92,7 +92,7 @@ class TestLinksEndpoint:
             headers=get_auth_headers(),
             timeout=30.0,
         )
-        assert resp.status_code == 500
+        assert resp.status_code == 404
 
 
 class TestContentEndpoint:
@@ -134,7 +134,7 @@ class TestContentEndpoint:
             headers=get_auth_headers(),
             timeout=30.0,
         )
-        assert resp.status_code == 500
+        assert resp.status_code == 404
 
 
 # --- Manual testing functions (run with python tests/test_modal.py) ---

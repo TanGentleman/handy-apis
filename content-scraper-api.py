@@ -148,12 +148,14 @@ class Scraper:
         method = content_config.get("method", "inner_html")
         selector = content_config.get("selector")
         wait_for = content_config.get("waitFor")
+        wait_for_timeout = content_config.get("waitForTimeoutMs", 30000)
         wait_until = content_config.get("waitUntil", "networkidle")
         goto_timeout = content_config.get("gotoTimeoutMs", 60000)
 
         print(
             f"[scrape_content] url={url}, method={method}, selector={selector}, "
-            f"wait_until={wait_until}, goto_timeout={goto_timeout}"
+            f"wait_until={wait_until}, goto_timeout={goto_timeout}, "
+            f"wait_for_timeout={wait_for_timeout}"
         )
 
         # Determine permissions based on extraction method
@@ -175,7 +177,9 @@ class Scraper:
             # Wait for content to be ready
             if wait_for:
                 print(f"[scrape_content] Waiting for selector: {wait_for}")
-                page.wait_for_selector(wait_for, state="visible", timeout=30000)
+                page.wait_for_selector(
+                    wait_for, state="visible", timeout=wait_for_timeout
+                )
                 page.wait_for_timeout(500)
 
             # Extract content based on method
@@ -212,13 +216,15 @@ class Scraper:
         links_config = config.get("links", {})
         start_urls = links_config.get("startUrls", [""])
         wait_for = links_config.get("waitFor")
+        wait_for_timeout = links_config.get("waitForTimeoutMs", 30000)
         wait_until = links_config.get("waitUntil", "networkidle")
         goto_timeout = links_config.get("gotoTimeoutMs", 60000)
         pattern = links_config.get("pattern", "")
 
         print(
             f"[scrape_links_browser] base_url={base_url}, pattern={pattern}, "
-            f"wait_for={wait_for}, wait_until={wait_until}, goto_timeout={goto_timeout}"
+            f"wait_for={wait_for}, wait_until={wait_until}, goto_timeout={goto_timeout}, "
+            f"wait_for_timeout={wait_for_timeout}"
         )
 
         context = self.browser.new_context()
@@ -238,7 +244,9 @@ class Scraper:
             # Wait for content
             if wait_for:
                 print(f"[scrape_links_browser] Waiting for selector: {wait_for}")
-                page.wait_for_selector(wait_for, state="visible", timeout=30000)
+                page.wait_for_selector(
+                    wait_for, state="visible", timeout=wait_for_timeout
+                )
                 page.wait_for_timeout(2000)
 
             # Extract all links
@@ -402,6 +410,8 @@ async def get_site_content(
     if not config:
         raise HTTPException(status_code=404, detail=f"Unknown site: {site_id}")
 
+    if not path:
+        path = config.get("defaultPath", "")
     cache_key = f"{site_id}:{path}"
     url = config["baseUrl"] + path
 
