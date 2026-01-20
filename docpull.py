@@ -121,6 +121,90 @@ def cmd_content(site_id: str, path: str, force: bool = False):
     print(f"Saved to {out_path} ({len(content)} chars) {cache_status}")
 
 
+def cmd_index(site_id: str, max_concurrent: int = 50):
+    """Fetch and save all pages from a site using parallel bulk API."""
+    print(f"Indexing {site_id}...", file=sys.stderr)
+
+    # Use the parallel bulk indexing API endpoint
+    resp = httpx.post(
+        f"{API_BASE}/sites/{site_id}/index",
+        params={"max_concurrent": max_concurrent},
+        headers=get_auth_headers(),
+        timeout=600.0,  # 10 minute timeout for large sites
+    )
+    resp.raise_for_status()
+    data = resp.json()
+
+    cached = data.get("cached", 0)
+    scraped = data.get("scraped", 0)
+    print(
+        f"\nTotal: {data['total']} pages | Cached: {cached} | Scraped: {scraped}",
+        file=sys.stderr,
+    )
+    print(
+        f"Success: {data['successful']} | Failed: {data['failed']}",
+        file=sys.stderr,
+    )
+    if data.get("errors"):
+        print("\nFirst 10 errors:", file=sys.stderr)
+        for err in data["errors"]:
+            print(f"  {err['path']}: {err['error']}", file=sys.stderr)
+
+
+def cmd_cache(action: str = "stats", site_id: str = None):
+    """Manage cache: stats, clear <site_id>, or clear-all."""
+    if action == "stats":
+        resp = httpx.get(f"{API_BASE}/cache/stats", headers=get_auth_headers())
+        resp.raise_for_status()
+        data = resp.json()
+        print(f"Total cache entries: {data['total_entries']}")
+        print(f"\nBy type:")
+        for type_name, count in data["by_type"].items():
+            print(f"  {type_name}: {count}")
+        print(f"\nBy site:")
+        for site, count in data["by_site"].items():
+            print(f"  {site}: {count}")
+    elif action == "clear" and site_id:
+        resp = httpx.delete(
+            f"{API_BASE}/cache/{site_id}", headers=get_auth_headers()
+        )
+        resp.raise_for_status()
+        print(f"Cleared {resp.json()['deleted']} cache entries for {site_id}")
+    else:
+        print("Usage: docpull cache stats")
+        print("       docpull cache clear <site_id>")
+
+
+def cmd_errors(action: str = "list", site_id: str = None):
+    """Manage error tracking: list, clear <site_id>, or clear-all."""
+    if action == "list":
+        resp = httpx.get(f"{API_BASE}/errors", headers=get_auth_headers())
+        resp.raise_for_status()
+        data = resp.json()
+        print(f"Total failed links: {data['total_failed_links']}")
+        if data["errors"]:
+            print("\nTop errors (by count):")
+            for err in data["errors"][:20]:  # Show top 20
+                print(
+                    f"  [{err['count']}x] {err['site_id']}{err['path']}: "
+                    f"{err['last_error'][:60]}"
+                )
+    elif action == "clear" and site_id:
+        resp = httpx.delete(
+            f"{API_BASE}/errors/{site_id}", headers=get_auth_headers()
+        )
+        resp.raise_for_status()
+        print(f"Cleared {resp.json()['cleared']} errors for {site_id}")
+    elif action == "clear-all":
+        resp = httpx.delete(f"{API_BASE}/errors", headers=get_auth_headers())
+        resp.raise_for_status()
+        print(f"Cleared {resp.json()['cleared']} errors")
+    else:
+        print("Usage: docpull errors list")
+        print("       docpull errors clear <site_id>")
+        print("       docpull errors clear-all")
+
+
 def print_usage():
     print("""Usage: docpull <command> [args]
 
@@ -130,11 +214,20 @@ Commands:
   links <site_id> --save           Also save links to ./data/<site_id>_links.json
   content <site_id> <path>         Get content (uses cache if <1hr old)
   content <site_id> <path> --force Force fresh scrape, ignore cache
+  index <site_id>                  Fetch and cache all pages from a site
+  cache stats                      Show cache statistics
+  cache clear <site_id>            Clear cache for a site
+  errors list                      Show all failed links
+  errors clear <site_id>           Clear errors for a site
+  errors clear-all                 Clear all errors
 
 Examples:
   docpull sites
   docpull links cursor --save
   docpull content modal /guide
+  docpull index modal
+  docpull cache stats
+  docpull errors list
 """)
 
 
@@ -153,6 +246,26 @@ def main():
     elif cmd == "content" and len(sys.argv) >= 4:
         force = "--force" in sys.argv
         cmd_content(sys.argv[2], sys.argv[3], force=force)
+    elif cmd == "index" and len(sys.argv) >= 3:
+        cmd_index(sys.argv[2])
+    elif cmd == "cache" and len(sys.argv) >= 2:
+        if len(sys.argv) == 2 or sys.argv[2] == "stats":
+            cmd_cache("stats")
+        elif len(sys.argv) >= 4 and sys.argv[2] == "clear":
+            cmd_cache("clear", sys.argv[3])
+        else:
+            print_usage()
+            sys.exit(1)
+    elif cmd == "errors":
+        if len(sys.argv) == 2 or sys.argv[2] == "list":
+            cmd_errors("list")
+        elif len(sys.argv) >= 4 and sys.argv[2] == "clear":
+            cmd_errors("clear", sys.argv[3])
+        elif len(sys.argv) >= 3 and sys.argv[2] == "clear-all":
+            cmd_errors("clear-all")
+        else:
+            print_usage()
+            sys.exit(1)
     elif cmd in ("--help", "-h", "help"):
         print_usage()
     else:
