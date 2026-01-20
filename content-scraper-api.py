@@ -41,6 +41,7 @@ error_tracker = modal.Dict.from_name("scraper-errors", create_if_missing=True)
 
 DEFAULT_MAX_AGE = 3600  # 1 hour
 ERROR_THRESHOLD = 3  # Skip links that have failed this many times
+ERROR_EXPIRY = 86400  # 24 hours - errors auto-expire
 
 
 # --- Load sites config ---
@@ -139,9 +140,9 @@ class Scraper:
                 pass  # Banner may not exist
 
     @modal.method()
-    def scrape_content(self, site_id: str, path: str) -> dict:
+    def scrape_content(self, site_id: str, path: str, force: bool = False) -> dict:
         """Scrape content from a page using browser."""
-        print(f"[scrape_content] site_id={site_id}, path={path}")
+        print(f"[scrape_content] site_id={site_id}, path={path}, force={force}")
         sites_config = load_sites_config()
         config = sites_config.get(site_id)
         if not config:
@@ -151,22 +152,37 @@ class Scraper:
         url = config["baseUrl"] + path
         error_key = f"{site_id}:{path}"
 
-        # Check error tracker - skip if failed too many times
-        try:
-            error_info = error_tracker[error_key]
-            if error_info and error_info.get("count", 0) >= ERROR_THRESHOLD:
-                print(
-                    f"[scrape_content] SKIPPING: {url} failed {error_info['count']} times. "
-                    f"Last error: {error_info.get('last_error', 'unknown')}"
-                )
-                return {
-                    "success": False,
-                    "error": f"Skipped: failed {error_info['count']} times",
-                    "url": url,
-                    "error_count": error_info["count"],
-                }
-        except KeyError:
-            pass  # No error history
+        # Force flag clears error tracking for this path
+        if force:
+            try:
+                error_tracker.pop(error_key, None)
+            except Exception:
+                pass
+        else:
+            # Check error tracker - skip if failed too many times (unless expired)
+            try:
+                error_info = error_tracker[error_key]
+                if error_info and error_info.get("count", 0) >= ERROR_THRESHOLD:
+                    # Check if error has expired (auto-recovery)
+                    age = time.time() - error_info.get("timestamp", 0)
+                    if age < ERROR_EXPIRY:
+                        print(
+                            f"[scrape_content] SKIPPING: {url} failed {error_info['count']} times. "
+                            f"Last error: {error_info.get('last_error', 'unknown')}"
+                        )
+                        return {
+                            "success": False,
+                            "error": f"Skipped: failed {error_info['count']} times",
+                            "url": url,
+                            "error_count": error_info["count"],
+                        }
+                    else:
+                        # Error expired, clear it and retry
+                        print(f"[scrape_content] Error expired for {url}, retrying...")
+                        error_tracker.pop(error_key, None)
+            except KeyError:
+                pass  # No error history
+
         content_config = config.get("content", {})
         method = content_config.get("method", "inner_html")
         selector = content_config.get("selector")
@@ -397,18 +413,17 @@ async def root():
         "endpoints": {
             "/sites": "GET - List available site IDs",
             "/sites/{site_id}/links": "GET - Get all doc links for a site (cached)",
-            "/sites/{site_id}/content": "GET - Get content from a page (cached)",
+            "/sites/{site_id}/content": "GET - Get content from a page (cached, max_age=0 to force)",
             "/sites/{site_id}/index": "POST - Fetch all pages in parallel",
             "/cache/stats": "GET - Get cache statistics",
             "/cache/{site_id}": "DELETE - Clear cache for a site",
-            "/errors": "GET - List all failed links with error counts",
-            "/errors": "DELETE - Clear all error tracking",
+            "/errors": "GET/DELETE - List or clear all error tracking",
             "/errors/{site_id}": "DELETE - Clear errors for a site",
         },
         "features": [
             "Links caching (when >1 link)",
             "Content caching (1 hour default)",
-            "Error tracking (skip after 3 failures)",
+            "Error tracking (skip after 3 failures, auto-expire 24h, force clears)",
             "Parallel bulk indexing (50 concurrent)",
         ],
     }
@@ -519,9 +534,9 @@ async def get_site_content(
     except KeyError:
         pass  # Not in cache
 
-    # Scrape fresh content
+    # Scrape fresh content (force=True if max_age=0 to also clear error tracking)
     scraper = Scraper()
-    result = scraper.scrape_content.remote(site_id, path)
+    result = scraper.scrape_content.remote(site_id, path, force=(max_age == 0))
 
     if not result["success"]:
         raise HTTPException(status_code=500, detail=result.get("error"))
@@ -557,8 +572,8 @@ async def cache_stats():
         # Track by site
         by_site[site] = by_site.get(site, 0) + 1
 
-        # Track by type (links keys have "links" in them)
-        if "links" in key:
+        # Track by type (links keys end with ":links")
+        if key.endswith(":links"):
             by_type["links"] += 1
         else:
             by_type["content"] += 1

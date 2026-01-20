@@ -15,8 +15,15 @@ python docpull.py links terraform-aws
 # Fetch content (cached for 1 hour)
 python docpull.py content modal /guide
 
-# Force fresh scrape
+# Force fresh scrape (also clears error tracking for that path)
 python docpull.py content modal /guide --force
+
+# Bulk fetch all pages for a site (parallel, respects cache)
+python docpull.py index modal
+
+# Cache management
+python docpull.py cache stats              # View cache stats
+python docpull.py cache clear modal        # Clear cache for a site
 ```
 
 Output saved to `./docs/<site>/<path>.md`
