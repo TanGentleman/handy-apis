@@ -31,7 +31,7 @@ def cmd_sites():
         print(s)
 
 
-def cmd_links(site_id: str):
+def cmd_links(site_id: str, save: bool = False):
     """Get all documentation links for a site."""
     resp = httpx.get(
         f"{API_BASE}/sites/{site_id}/links",
@@ -43,6 +43,15 @@ def cmd_links(site_id: str):
     for link in data["links"]:
         print(link)
     print(f"\nTotal: {data['count']} links", file=sys.stderr)
+
+    if save:
+        out_dir = "./data"
+        os.makedirs(out_dir, exist_ok=True)
+        out_path = f"{out_dir}/{site_id}_links.json"
+        import json
+        with open(out_path, "w") as f:
+            json.dump({f"{site_id}_links": data["links"]}, f, indent=2)
+        print(f"Saved to {out_path}", file=sys.stderr)
 
 
 def cmd_content(site_id: str, path: str, force: bool = False):
@@ -79,15 +88,14 @@ def print_usage():
 Commands:
   sites                            List all available site IDs
   links <site_id>                  Get all doc links for a site
+  links <site_id> --save           Also save links to ./data/<site_id>_links.json
   content <site_id> <path>         Get content (uses cache if <1hr old)
   content <site_id> <path> --force Force fresh scrape, ignore cache
 
 Examples:
   docpull sites
-  docpull links terraform-aws
+  docpull links cursor --save
   docpull content modal /guide
-  docpull content modal /guide --force
-  docpull content terraform-aws /resources/aws_instance
 """)
 
 
@@ -101,7 +109,8 @@ def main():
     if cmd == "sites":
         cmd_sites()
     elif cmd == "links" and len(sys.argv) >= 3:
-        cmd_links(sys.argv[2])
+        save = "--save" in sys.argv
+        cmd_links(sys.argv[2], save=save)
     elif cmd == "content" and len(sys.argv) >= 4:
         force = "--force" in sys.argv
         cmd_content(sys.argv[2], sys.argv[3], force=force)
