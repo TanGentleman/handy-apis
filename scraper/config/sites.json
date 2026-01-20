@@ -44,15 +44,13 @@
         "startUrls": [""],
         "pattern": "registry.terraform.io/providers/hashicorp/aws/latest/docs",
         "waitFor": "#provider-docs-content",
-        "waitUntil": "domcontentloaded",
-        "gotoTimeoutMs": 60000
+        "waitUntil": "domcontentloaded"
       },
       "content": {
         "waitFor": "#provider-docs-content",
         "selector": "#provider-docs-content",
         "method": "inner_html",
-        "waitUntil": "domcontentloaded",
-        "gotoTimeoutMs": 60000
+        "waitUntil": "domcontentloaded"
       }
     },
     "cursor": {
@@ -61,10 +59,10 @@
       "mode": "browser",
       "extractor": "cursor",
       "links": {
-        "startUrls": ["", "/get-started", "/tab", "/chat", "/agent", "/context", "/settings"],
+        "startUrls": [""],
         "pattern": "/docs/",
         "waitUntil": "networkidle",
-        "gotoTimeoutMs": 60000
+        "maxDepth": 1
       },
       "content": {
         "mode": "browser",
@@ -75,12 +73,12 @@
     },
     "claude-code": {
       "name": "Claude Code",
-      "baseUrl": "https://docs.anthropic.com/en/docs/claude-code",
+      "baseUrl": "https://platform.claude.com/docs/en/intro",
       "mode": "fetch",
       "extractor": "claude_code",
       "links": {
         "startUrls": [""],
-        "pattern": "claude-code",
+        "pattern": "/docs/en/",
         "maxDepth": 2
       },
       "content": {
