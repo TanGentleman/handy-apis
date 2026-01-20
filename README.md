@@ -55,7 +55,7 @@ Content is saved to `./docs/<site>/` with paths converted to filenames:
 | `modal` | fetch | Modal documentation |
 | `convex` | fetch | Convex documentation |
 | `terraform-aws` | browser | Terraform AWS provider docs |
-| `cursor` | fetch | Cursor documentation |
+| `cursor` | browser | Cursor documentation |
 | `claude-code` | fetch | Claude Code documentation |
 | `unsloth` | fetch | Unsloth documentation |
 
