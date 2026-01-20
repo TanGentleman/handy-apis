@@ -30,8 +30,8 @@
       },
       "content": {
         "mode": "browser",
-        "waitFor": "//*[@id=\"__docusaurus_skipToContent_fallback\"]/div/div/main/div/div/div[1]/div/article/div[1]/button",
-        "selector": "//*[@id=\"__docusaurus_skipToContent_fallback\"]/div/div/main/div/div/div[1]/div/article/div[1]/button",
+        "waitFor": "div.flex.justify-end button",
+        "selector": "div.flex.justify-end button",
         "method": "click_copy"
       }
     },
