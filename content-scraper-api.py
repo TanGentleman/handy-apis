@@ -86,9 +86,10 @@ def extract_links_from_html(html: str, base_url: str, pattern: str) -> list[str]
         elif not link.startswith("http"):
             link = urljoin(base_url, link)
 
-        # Filter by pattern
+        # Filter by pattern, but always allow the base URL itself.
         if pattern and pattern not in link:
-            continue
+            if link != base_url and link != f"{base_url}/":
+                continue
 
         # Only include links from same domain
         if urlparse(link).netloc == urlparse(base_url).netloc:
@@ -232,36 +233,38 @@ class Scraper:
 
         try:
             all_links = set()
-            start_url = base_url + (start_urls[0] if start_urls else "")
 
-            print(f"[scrape_links_browser] Navigating to {start_url}...")
-            page.goto(start_url, wait_until=wait_until, timeout=goto_timeout)
-            print(f"[scrape_links_browser] Page loaded")
+            for start_path in (start_urls or [""]):
+                start_url = base_url + start_path
+                print(f"[scrape_links_browser] Navigating to {start_url}...")
+                page.goto(start_url, wait_until=wait_until, timeout=goto_timeout)
+                print(f"[scrape_links_browser] Page loaded")
 
-            # Handle site-specific setup
-            self._dismiss_cookie_banner(page, config)
+                # Handle site-specific setup
+                self._dismiss_cookie_banner(page, config)
 
-            # Wait for content
-            if wait_for:
-                print(f"[scrape_links_browser] Waiting for selector: {wait_for}")
-                page.wait_for_selector(
-                    wait_for, state="visible", timeout=wait_for_timeout
+                # Wait for content
+                if wait_for:
+                    print(f"[scrape_links_browser] Waiting for selector: {wait_for}")
+                    page.wait_for_selector(
+                        wait_for, state="visible", timeout=wait_for_timeout
+                    )
+                    page.wait_for_timeout(2000)
+
+                # Extract all links
+                print(f"[scrape_links_browser] Extracting links...")
+                raw_links = page.eval_on_selector_all(
+                    "a[href]", "elements => elements.map(e => e.href)"
                 )
-                page.wait_for_timeout(2000)
+                print(f"[scrape_links_browser] Found {len(raw_links)} raw links")
 
-            # Extract all links
-            print(f"[scrape_links_browser] Extracting links...")
-            raw_links = page.eval_on_selector_all(
-                "a[href]", "elements => elements.map(e => e.href)"
-            )
-            print(f"[scrape_links_browser] Found {len(raw_links)} raw links")
-
-            for link in raw_links:
-                clean = clean_url(link)
-                if pattern and pattern not in clean:
-                    continue
-                if clean.startswith(base_url) or urlparse(clean).netloc == urlparse(base_url).netloc:
-                    all_links.add(clean)
+                for link in raw_links:
+                    clean = clean_url(link)
+                    if pattern and pattern not in clean:
+                        if clean != base_url and clean != f"{base_url}/":
+                            continue
+                    if clean.startswith(base_url) or urlparse(clean).netloc == urlparse(base_url).netloc:
+                        all_links.add(clean)
 
             print(f"[scrape_links_browser] SUCCESS: {len(all_links)} links after filtering")
             return {"success": True, "links": sorted(all_links)}
