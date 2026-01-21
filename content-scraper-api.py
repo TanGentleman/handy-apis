@@ -480,7 +480,7 @@ async def get_site_links(
     # Use browser mode for JS-heavy sites, fetch mode for static sites
     if config.get("mode") == "browser":
         scraper = Scraper()
-        result = scraper.scrape_links_browser.remote(site_id)
+        result = await scraper.scrape_links_browser.remote.aio(site_id)
     else:
         result = await scrape_links_fetch.remote.aio(site_id)
 
@@ -546,7 +546,7 @@ async def get_site_content(
 
     # Scrape fresh content (force=True if max_age=0 to also clear error tracking)
     scraper = Scraper()
-    result = scraper.scrape_content.remote(site_id, path, force=(max_age == 0))
+    result = await scraper.scrape_content.remote.aio(site_id, path, force=(max_age == 0))
 
     if not result["success"]:
         raise HTTPException(status_code=500, detail=result.get("error"))
