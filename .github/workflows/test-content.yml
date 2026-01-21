@@ -55,25 +55,16 @@ jobs:
       - name: Install dependencies
         run: pip install httpx
 
-      - name: Build API URL
-        id: api
-        run: |
-          ENV="${{ inputs.environment }}"
-          if [ "$ENV" = "dev" ]; then
-            URL_SUFFIX="-dev"
-          else
-            URL_SUFFIX=""
-          fi
-          BASE_URL="https://${{ secrets.MODAL_USERNAME }}--content-scraper-api-fastapi-app${URL_SUFFIX}.modal.run"
-          echo "base_url=$BASE_URL" >> $GITHUB_OUTPUT
-          echo "Using environment: $ENV"
-          echo "API URL: $BASE_URL"
-
       - name: Test content for ${{ matrix.site }}
         env:
-          SCRAPER_API_URL: ${{ steps.api.outputs.base_url }}
+          ENVIRONMENT: ${{ inputs.environment || 'prod' }}
+          MODAL_USERNAME: ${{ secrets.MODAL_USERNAME }}
           MODAL_KEY: ${{ secrets.MODAL_KEY }}
           MODAL_SECRET: ${{ secrets.MODAL_SECRET }}
         run: |
           echo "Testing content endpoint for ${{ matrix.site }} (${{ matrix.path }})..."
-          python docpull.py content "${{ matrix.site }}" "${{ matrix.path }}" --force
+          OUTPUT=$(python docpull.py content "${{ matrix.site }}" "${{ matrix.path }}" --force)
+          echo "$OUTPUT"
+          CHARS=$(echo "$OUTPUT" | grep -oP '\(\K\d+(?= chars\))')
+          STATUS=$(echo "$OUTPUT" | grep -oP '\((fresh|cached)\)' | tr -d '()')
+          echo "### ${{ matrix.site }}: ${CHARS} chars (${STATUS})" >> $GITHUB_STEP_SUMMARY
