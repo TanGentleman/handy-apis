@@ -42,7 +42,7 @@
       "links": {
         "startUrls": [""],
         "pattern": "docs.datadoghq.com/",
-        "maxDepth": 2
+        "maxDepth": 3
       },
       "content": {
         "mode": "browser",
