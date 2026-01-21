@@ -1,71 +1,50 @@
 # CLAUDE.md
 
-Documentation scraper with caching. Fetches docs from various sites and saves locally as markdown.
+Documentation scraper: CLI fetches docs via Modal API, saves as markdown.
 
-## docpull CLI
+## Commands
 
 ```bash
-# List available sites
-python docpull.py sites
+uv sync                                # Install deps
+modal serve content-scraper-api.py     # Dev server
+modal deploy content-scraper-api.py    # Deploy
 
-# Get all doc links for a site
-python docpull.py links modal
-python docpull.py links modal --force      # Bypass cache (use after changing maxDepth in config)
-python docpull.py links modal --save       # Save to ./data/<site>_links.json
-
-# Fetch single page content (cached 1 hour)
-python docpull.py content modal /guide
-python docpull.py content modal /guide --force   # Bypass cache + clear error tracking
-
-# Bulk fetch entire site (parallel, respects cache)
-python docpull.py index modal
-
-# Cache management
-python docpull.py cache stats              # View stats by site and type
-python docpull.py cache clear modal        # Clear all cache for a site
+python docpull.py sites                # List sites
+python docpull.py links <site>         # Get links (--force bypasses cache)
+python docpull.py content <site> <path> # Fetch page (--force clears errors)
+python docpull.py index <site>         # Bulk fetch all pages
+python docpull.py cache stats          # Cache stats
+python docpull.py cache clear <site>   # Clear cache
 ```
-
-Output saved to `./docs/<site>/<path>.md`
 
 ## Key Files
 
-| File | Purpose |
-|------|---------|
-| `docpull.py` | CLI client |
-| `content-scraper-api.py` | Modal API (FastAPI + Playwright) |
-| `scraper/config/sites.json` | Site definitions (URLs, selectors, modes) |
-| `docs/ARCHITECTURE.md` | Detailed architecture docs |
+- `docpull.py` - CLI client
+- `content-scraper-api.py` - Modal API (FastAPI + Playwright)
+- `scraper/config/sites.json` - Site configs
 
-## Adding a New Site
+## Adding a Site
 
-Add config to `scraper/config/sites.json`:
+Add to `scraper/config/sites.json`:
 
 ```json
-{
-  "new-site": {
-    "name": "New Site",
-    "baseUrl": "https://docs.example.com",
-    "mode": "fetch",
-    "links": {
-      "startUrls": [""],
-      "pattern": "docs.example.com",
-      "maxDepth": 2
-    },
-    "content": {
-      "mode": "browser",
-      "selector": "#content",
-      "method": "inner_html"
-    }
+"site-id": {
+  "name": "Site Name",
+  "baseUrl": "https://docs.example.com",
+  "mode": "fetch",
+  "links": {
+    "startUrls": ["/section1", "/section2"],
+    "pattern": "docs.example.com",
+    "maxDepth": 1
+  },
+  "content": {
+    "mode": "browser",
+    "selector": "#content",
+    "method": "inner_html"
   }
 }
 ```
 
-Modes: `fetch` (HTTP crawl) or `browser` (Playwright for JS-heavy sites)
-
-## Dev Commands
-
-```bash
-uv sync                                # Install deps
-modal serve content-scraper-api.py     # Dev server (hot reload)
-modal deploy content-scraper-api.py    # Deploy to Modal
-```
+- `mode`: `fetch` (HTTP crawl) or `browser` (Playwright for JS sites)
+- `maxDepth`: Only affects fetch mode (browser just extracts from startUrls)
+- `method`: `inner_html` or `click_copy` (for copy buttons)

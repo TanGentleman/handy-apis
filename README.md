@@ -1,94 +1,78 @@
 # handy-apis
 
-Simple Modal-based API endpoints for web automation and scraping.
+Modal-based documentation scraper. Fetches docs from various sites and saves locally as markdown.
 
-Draws heavily from: https://github.com/modal-labs/modal-examples
-
-## Quick Start
+## Setup
 
 ```bash
-# install deps
 uv sync
-
-# deploy stable version
-modal deploy content-scraper-api.py
-
-# while developing, use the hot-reloading dev server
-modal serve content-scraper-api.py
 ```
 
-## docpull CLI
-
-The main way to use this tool. Fetches documentation from supported sites and saves it locally.
-
-**Setup:** Create a `.env` file with your Modal credentials:
-```bash
+Create `.env` with Modal credentials:
+```
 MODAL_KEY=wk-...
 MODAL_SECRET=ws-...
 ```
 
-**Usage:**
+Deploy:
+```bash
+modal deploy content-scraper-api.py
+```
+
+## Usage
 
 ```bash
-# List available sites
-python docpull.py sites
-
-# Get all doc links for a site
-python docpull.py links modal
-python docpull.py links modal --force      # Bypass cache (useful after changing maxDepth)
-python docpull.py links modal --save       # Save links to ./data/<site>_links.json
-
-# Fetch content from a page (saves to ./docs/<site>/<path>.md)
-python docpull.py content modal /guide
-python docpull.py content modal /guide --force   # Bypass cache, clear error tracking
-
-# Bulk fetch all pages for a site
-python docpull.py index modal              # Parallel fetch, respects cache
-
-# Cache management
-python docpull.py cache stats              # View cache statistics
-python docpull.py cache clear modal        # Clear all cache for a site
+python docpull.py sites                     # List available sites
+python docpull.py links modal               # Get all doc links
+python docpull.py links modal --force       # Bypass cache
+python docpull.py content modal /guide      # Fetch single page
+python docpull.py index modal               # Bulk fetch entire site
 ```
 
-Content is saved to `./docs/<site>/` with paths converted to filenames:
-- `/guide` → `guide.md`
-- `/guide/gpu` → `guide_gpu.md`
-- `/resources/aws_instance` → `resources_aws_instance.md`
-
-## Supported Sites
-
-| Site | Mode | Description |
-|------|------|-------------|
-| `modal` | fetch | Modal documentation |
-| `convex` | fetch | Convex documentation |
-| `terraform-aws` | browser | Terraform AWS provider docs |
-| `cursor` | browser | Cursor documentation |
-| `claude-code` | fetch | Claude Code documentation |
-| `unsloth` | fetch | Unsloth documentation |
-
-## REST API
-
-Deploy `content-scraper-api.py` to get these endpoints:
-
-```
-GET  /sites                        # List available site IDs
-GET  /sites/{site_id}/links        # Get all doc links for a site
-GET  /sites/{site_id}/content      # Get content from a page
-
-# Legacy endpoints
-GET  /docs/{site_id}/{page}        # Get doc (cached or fresh scrape)
-POST /scrape                       # Scrape any URL (stateless)
-```
-
-## GitHub Actions
-
-There's a workflow for batch scraping that saves results to `docs/`.
-
-**Setup**: add these secrets to your repo (Settings → Secrets and variables → Actions):
-- `MODAL_USERNAME`: your username from `https://[your-username]--{project-name}.modal.run/`
-- `MODAL_KEY`: proxy auth token ID (starts with `wk-`)
-- `MODAL_SECRET`: proxy auth token secret (starts with `ws-`)
+Output: `./docs/<site>/<path>.md`
 
 ## Architecture
 
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed architecture documentation.
+```
+docpull.py (CLI) ──▶ content-scraper-api.py (Modal)
+                           │
+              ┌────────────┴────────────┐
+              ▼                         ▼
+      modal.Dict (cache)        modal.Dict (errors)
+      - Content & links         - Failed link tracker
+      - 1h default TTL          - 24h auto-expiry
+```
+
+**Link discovery:**
+- `mode: "fetch"` - HTTP crawl from `startUrls`, follows links to `maxDepth`
+- `mode: "browser"` - Playwright extracts links from `startUrls` (no recursion)
+
+**Content scraping:** Playwright loads page, extracts via CSS selector or copy button click.
+
+**Error handling:** Links failing 3+ times are skipped. Use `--force` to retry.
+
+## Configuration
+
+Site configs in `scraper/config/sites.json`. Key fields:
+
+| Field | Description |
+|-------|-------------|
+| `baseUrl` | Docs root URL |
+| `mode` | `fetch` or `browser` |
+| `links.startUrls` | Entry points for crawling |
+| `links.maxDepth` | Recursion depth (fetch mode only) |
+| `links.pattern` | URL filter pattern |
+| `content.selector` | CSS/XPath for content extraction |
+| `content.method` | `inner_html` or `click_copy` |
+| `content.waitUntil` | `domcontentloaded` or `networkidle` |
+
+## REST API
+
+```
+GET  /sites                    # List sites
+GET  /sites/{id}/links         # Get doc links
+GET  /sites/{id}/content       # Get page content
+POST /sites/{id}/index         # Bulk fetch
+GET  /cache/stats              # Cache stats
+DELETE /cache/{id}             # Clear cache
+```
