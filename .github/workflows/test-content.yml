@@ -24,14 +24,13 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v4
-
       - name: Set up Python
-        run: uv python install 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
 
       - name: Install dependencies
-        run: uv sync
+        run: pip install httpx python-dotenv
 
       - name: Build API URL
         id: api
@@ -53,8 +52,6 @@ jobs:
           MODAL_KEY: ${{ secrets.MODAL_KEY }}
           MODAL_SECRET: ${{ secrets.MODAL_SECRET }}
         run: |
-          source .venv/bin/activate
-
           # Site test paths (matching tests/test_modal.py)
           declare -A SITE_PATHS
           SITE_PATHS["modal"]="/guide/dicts"
