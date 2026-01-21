@@ -35,6 +35,23 @@
         "method": "click_copy"
       }
     },
+    "datadog": {
+      "name": "Datadog Docs",
+      "baseUrl": "https://docs.datadoghq.com",
+      "mode": "fetch",
+      "links": {
+        "startUrls": [""],
+        "pattern": "docs.datadoghq.com/",
+        "maxDepth": 2
+      },
+      "content": {
+        "mode": "browser",
+        "waitFor": "#mainContent",
+        "selector": "#mainContent",
+        "method": "inner_html",
+        "waitUntil": "domcontentloaded"
+      }
+    },
     "terraform-aws": {
       "name": "Terraform AWS Provider",
       "baseUrl": "https://registry.terraform.io/providers/hashicorp/aws/latest/docs",
