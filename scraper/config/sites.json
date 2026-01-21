@@ -88,15 +88,30 @@
         "method": "click_copy"
       }
     },
+    "claude-platform": {
+      "name": "Claude Platform",
+      "baseUrl": "https://platform.claude.com/docs/en",
+      "mode": "fetch",
+      "links": {
+        "startUrls": ["/intro"],
+        "pattern": "/docs/en/",
+        "maxDepth": 2
+      },
+      "content": {
+        "mode": "browser",
+        "waitFor": "//button[.//span[normalize-space(text())=\"Copy page\"]]",
+        "selector": "//button[.//span[normalize-space(text())=\"Copy page\"]]",
+        "method": "click_copy"
+      }
+    },
     "claude-code": {
       "name": "Claude Code",
-      "baseUrl": "https://platform.claude.com/docs/en/intro",
+      "baseUrl": "https://code.claude.com/docs/en",
       "mode": "fetch",
-      "extractor": "claude_code",
       "links": {
         "startUrls": [""],
         "pattern": "/docs/en/",
-        "maxDepth": 2
+        "maxDepth": 1
       },
       "content": {
         "mode": "browser",
