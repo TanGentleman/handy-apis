@@ -67,4 +67,7 @@ jobs:
           MODAL_SECRET: ${{ secrets.MODAL_SECRET }}
         run: |
           echo "Testing links endpoint for ${{ matrix.site }}..."
-          python docpull.py links "${{ matrix.site }}" --force
+          OUTPUT=$(python docpull.py links "${{ matrix.site }}" --force 2>&1)
+          echo "$OUTPUT"
+          COUNT=$(echo "$OUTPUT" | grep -oP 'Total: \K\d+')
+          echo "### ${{ matrix.site }}: ${COUNT} links" >> $GITHUB_STEP_SUMMARY
