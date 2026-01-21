@@ -105,6 +105,23 @@
         "selector": "//button[@aria-label=\"Copy page\"]",
         "method": "click_copy"
       }
+    },
+    "playwright": {
+      "name": "Playwright Python",
+      "baseUrl": "https://playwright.dev/python/docs",
+      "mode": "browser",
+      "extractor": "playwright",
+      "links": {
+        "startUrls": ["/library"],
+        "pattern": "playwright.dev/python/docs/",
+        "maxDepth": 2
+      },
+      "content": {
+        "waitFor": "main article .theme-doc-markdown",
+        "selector": "main article .theme-doc-markdown",
+        "method": "inner_html",
+        "waitUntil": "domcontentloaded"
+      }
     }
   }
 }
