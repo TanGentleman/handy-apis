@@ -541,12 +541,13 @@ async def get_site_content(
     if not result["success"]:
         raise HTTPException(status_code=500, detail=result.get("error"))
 
-    # Save to cache
-    cache[cache_key] = {
-        "content": result["content"],
-        "url": result["url"],
-        "timestamp": time.time(),
-    }
+    # Save to cache only if content is non-empty
+    if result["content"]:
+        cache[cache_key] = {
+            "content": result["content"],
+            "url": result["url"],
+            "timestamp": time.time(),
+        }
 
     return ContentResponse(
         site_id=site_id,
@@ -722,13 +723,14 @@ async def index_site(
         elif isinstance(result, dict):
             if result.get("success"):
                 successful += 1
-                # Write to cache
-                cache_key = f"{site_id}:{path}"
-                cache[cache_key] = {
-                    "content": result["content"],
-                    "url": result["url"],
-                    "timestamp": time.time(),
-                }
+                # Write to cache only if content is non-empty
+                if result["content"]:
+                    cache_key = f"{site_id}:{path}"
+                    cache[cache_key] = {
+                        "content": result["content"],
+                        "url": result["url"],
+                        "timestamp": time.time(),
+                    }
             else:
                 failed += 1
                 errors.append({"path": path, "error": result.get("error", "unknown")})
