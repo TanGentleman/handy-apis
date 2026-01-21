@@ -1,6 +1,7 @@
 # Test Links Workflow
 #
 # Fetches documentation links from all configured sites to verify the links endpoint.
+# Sites are tested in parallel using a matrix strategy.
 
 name: Test Links
 
@@ -19,6 +20,19 @@ on:
 jobs:
   test-links:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        site:
+          - modal
+          - convex
+          - datadog
+          - terraform-aws
+          - cursor
+          - claude-platform
+          - claude-code
+          - unsloth
+          - playwright
 
     steps:
       - name: Checkout repository
@@ -46,34 +60,11 @@ jobs:
           echo "Using environment: $ENV"
           echo "API URL: $BASE_URL"
 
-      - name: Test links for all sites
+      - name: Test links for ${{ matrix.site }}
         env:
           SCRAPER_API_URL: ${{ steps.api.outputs.base_url }}
           MODAL_KEY: ${{ secrets.MODAL_KEY }}
           MODAL_SECRET: ${{ secrets.MODAL_SECRET }}
         run: |
-          SITES="modal convex datadog terraform-aws cursor claude-platform claude-code unsloth playwright"
-
-          echo "Testing links endpoint for all sites..."
-          echo "=========================================="
-
-          FAILED=""
-          for site in $SITES; do
-            echo ""
-            echo "--- $site ---"
-            if python docpull.py links "$site" --force 2>&1 | tail -5; then
-              echo "✓ $site OK"
-            else
-              echo "✗ $site FAILED"
-              FAILED="$FAILED $site"
-            fi
-          done
-
-          echo ""
-          echo "=========================================="
-          if [ -n "$FAILED" ]; then
-            echo "Failed sites:$FAILED"
-            exit 1
-          else
-            echo "All sites OK!"
-          fi
+          echo "Testing links endpoint for ${{ matrix.site }}..."
+          python docpull.py links "${{ matrix.site }}" --force

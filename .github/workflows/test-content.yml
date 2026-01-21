@@ -1,6 +1,7 @@
 # Test Content Workflow
 #
 # Fetches one piece of content from each configured site to verify the content endpoint.
+# Sites are tested in parallel using a matrix strategy.
 
 name: Test Content
 
@@ -19,6 +20,28 @@ on:
 jobs:
   test-content:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - site: modal
+            path: /guide/dicts
+          - site: convex
+            path: /functions/http-actions
+          - site: datadog
+            path: /tracing/trace_explorer
+          - site: terraform-aws
+            path: /resources/acm_certificate
+          - site: cursor
+            path: /agent/browser
+          - site: claude-platform
+            path: /agent-sdk/mcp
+          - site: claude-code
+            path: /headless
+          - site: unsloth
+            path: /basics/chat-templates
+          - site: playwright
+            path: /evaluating
 
     steps:
       - name: Checkout repository
@@ -46,52 +69,11 @@ jobs:
           echo "Using environment: $ENV"
           echo "API URL: $BASE_URL"
 
-      - name: Test content for all sites
+      - name: Test content for ${{ matrix.site }}
         env:
           SCRAPER_API_URL: ${{ steps.api.outputs.base_url }}
           MODAL_KEY: ${{ secrets.MODAL_KEY }}
           MODAL_SECRET: ${{ secrets.MODAL_SECRET }}
         run: |
-          # Site test paths (matching tests/test_modal.py)
-          declare -A SITE_PATHS
-          SITE_PATHS["modal"]="/guide/dicts"
-          SITE_PATHS["convex"]="/functions/http-actions"
-          SITE_PATHS["datadog"]="/tracing/trace_explorer"
-          SITE_PATHS["terraform-aws"]="/resources/acm_certificate"
-          SITE_PATHS["cursor"]="/agent/browser"
-          SITE_PATHS["claude-platform"]="/agent-sdk/mcp"
-          SITE_PATHS["claude-code"]="/headless"
-          SITE_PATHS["unsloth"]="/basics/chat-templates"
-          SITE_PATHS["playwright"]="/evaluating"
-
-          SITES="modal convex datadog terraform-aws cursor claude-platform claude-code unsloth playwright"
-
-          echo "Testing content endpoint for all sites..."
-          echo "=========================================="
-
-          FAILED=""
-          for site in $SITES; do
-            path="${SITE_PATHS[$site]}"
-            echo ""
-            echo "--- $site $path ---"
-            if python docpull.py content "$site" "$path" --force; then
-              echo "✓ $site OK"
-            else
-              echo "✗ $site FAILED"
-              FAILED="$FAILED $site"
-            fi
-          done
-
-          echo ""
-          echo "=========================================="
-          if [ -n "$FAILED" ]; then
-            echo "Failed sites:$FAILED"
-            exit 1
-          else
-            echo "All sites OK!"
-          fi
-
-          # Show what was saved
-          echo ""
-          echo "Saved files:"
-          find docs -name "*.md" -type f 2>/dev/null | head -20 || echo "No files saved"
+          echo "Testing content endpoint for ${{ matrix.site }} (${{ matrix.path }})..."
+          python docpull.py content "${{ matrix.site }}" "${{ matrix.path }}" --force
