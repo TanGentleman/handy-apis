@@ -25,6 +25,8 @@ def get_auth_headers() -> dict:
 # Default timeout for requests
 DEFAULT_TIMEOUT = 15.0
 
+ALL_SITES = ["modal", "convex", "terraform-aws", "cursor", "claude-platform", "claude-code", "unsloth", "playwright", "datadog"]
+
 
 class TestRootAndHealth:
     """Test basic API endpoints."""
@@ -59,8 +61,7 @@ class TestSitesEndpoint:
         assert isinstance(data["sites"], list)
         assert data["count"] == len(data["sites"])
         # Check that expected sites are present
-        expected_sites = ["modal", "convex", "terraform-aws", "cursor", "claude-code"]
-        for site in expected_sites:
+        for site in ALL_SITES:
             assert site in data["sites"], f"Expected site '{site}' not found"
 
 
