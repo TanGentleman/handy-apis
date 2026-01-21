@@ -30,7 +30,7 @@ jobs:
           python-version: '3.12'
 
       - name: Install dependencies
-        run: pip install httpx python-dotenv
+        run: pip install httpx
 
       - name: Build API URL
         id: api
