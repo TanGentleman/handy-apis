@@ -1,0 +1,80 @@
+# Test Links Workflow
+#
+# Fetches documentation links from all configured sites to verify the links endpoint.
+
+name: Test Links
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - prod
+          - dev
+
+jobs:
+  test-links:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Build API URL
+        id: api
+        run: |
+          ENV="${{ inputs.environment }}"
+          if [ "$ENV" = "dev" ]; then
+            URL_SUFFIX="-dev"
+          else
+            URL_SUFFIX=""
+          fi
+          BASE_URL="https://${{ secrets.MODAL_USERNAME }}--content-scraper-api-fastapi-app${URL_SUFFIX}.modal.run"
+          echo "base_url=$BASE_URL" >> $GITHUB_OUTPUT
+          echo "Using environment: $ENV"
+          echo "API URL: $BASE_URL"
+
+      - name: Test links for all sites
+        env:
+          SCRAPER_API_URL: ${{ steps.api.outputs.base_url }}
+          MODAL_KEY: ${{ secrets.MODAL_KEY }}
+          MODAL_SECRET: ${{ secrets.MODAL_SECRET }}
+        run: |
+          SITES="modal convex datadog terraform-aws cursor claude-platform claude-code unsloth playwright"
+
+          echo "Testing links endpoint for all sites..."
+          echo "=========================================="
+
+          FAILED=""
+          for site in $SITES; do
+            echo ""
+            echo "--- $site ---"
+            if uv run python docpull.py links "$site" --force 2>&1 | tail -5; then
+              echo "✓ $site OK"
+            else
+              echo "✗ $site FAILED"
+              FAILED="$FAILED $site"
+            fi
+          done
+
+          echo ""
+          echo "=========================================="
+          if [ -n "$FAILED" ]; then
+            echo "Failed sites:$FAILED"
+            exit 1
+          else
+            echo "All sites OK!"
+          fi

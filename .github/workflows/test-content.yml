@@ -1,0 +1,98 @@
+# Test Content Workflow
+#
+# Fetches one piece of content from each configured site to verify the content endpoint.
+
+name: Test Content
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - prod
+          - dev
+
+jobs:
+  test-content:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Build API URL
+        id: api
+        run: |
+          ENV="${{ inputs.environment }}"
+          if [ "$ENV" = "dev" ]; then
+            URL_SUFFIX="-dev"
+          else
+            URL_SUFFIX=""
+          fi
+          BASE_URL="https://${{ secrets.MODAL_USERNAME }}--content-scraper-api-fastapi-app${URL_SUFFIX}.modal.run"
+          echo "base_url=$BASE_URL" >> $GITHUB_OUTPUT
+          echo "Using environment: $ENV"
+          echo "API URL: $BASE_URL"
+
+      - name: Test content for all sites
+        env:
+          SCRAPER_API_URL: ${{ steps.api.outputs.base_url }}
+          MODAL_KEY: ${{ secrets.MODAL_KEY }}
+          MODAL_SECRET: ${{ secrets.MODAL_SECRET }}
+        run: |
+          # Site test paths (matching tests/test_modal.py)
+          declare -A SITE_PATHS
+          SITE_PATHS["modal"]="/guide/dicts"
+          SITE_PATHS["convex"]="/functions/http-actions"
+          SITE_PATHS["datadog"]="/tracing/trace_explorer"
+          SITE_PATHS["terraform-aws"]="/resources/acm_certificate"
+          SITE_PATHS["cursor"]="/agent/browser"
+          SITE_PATHS["claude-platform"]="/agent-sdk/mcp"
+          SITE_PATHS["claude-code"]="/headless"
+          SITE_PATHS["unsloth"]="/basics/chat-templates"
+          SITE_PATHS["playwright"]="/evaluating"
+
+          SITES="modal convex datadog terraform-aws cursor claude-platform claude-code unsloth playwright"
+
+          echo "Testing content endpoint for all sites..."
+          echo "=========================================="
+
+          FAILED=""
+          for site in $SITES; do
+            path="${SITE_PATHS[$site]}"
+            echo ""
+            echo "--- $site $path ---"
+            if uv run python docpull.py content "$site" "$path" --force; then
+              echo "✓ $site OK"
+            else
+              echo "✗ $site FAILED"
+              FAILED="$FAILED $site"
+            fi
+          done
+
+          echo ""
+          echo "=========================================="
+          if [ -n "$FAILED" ]; then
+            echo "Failed sites:$FAILED"
+            exit 1
+          else
+            echo "All sites OK!"
+          fi
+
+          # Show what was saved
+          echo ""
+          echo "Saved files:"
+          find docs -name "*.md" -type f 2>/dev/null | head -20 || echo "No files saved"
