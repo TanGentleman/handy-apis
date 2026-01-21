@@ -166,10 +166,7 @@ class Scraper:
                     # Check if error has expired (auto-recovery)
                     age = time.time() - error_info.get("timestamp", 0)
                     if age < ERROR_EXPIRY:
-                        print(
-                            f"[scrape_content] SKIPPING: {url} failed {error_info['count']} times. "
-                            f"Last error: {error_info.get('last_error', 'unknown')}"
-                        )
+                        print(f"[scrape_content] SKIP {url} (failed {error_info['count']}x)")
                         return {
                             "success": False,
                             "error": f"Skipped: failed {error_info['count']} times",
@@ -191,11 +188,7 @@ class Scraper:
         wait_until = content_config.get("waitUntil", "domcontentloaded")
         goto_timeout = content_config.get("gotoTimeoutMs", 30000)
 
-        print(
-            f"[scrape_content] url={url}, method={method}, selector={selector}, "
-            f"wait_until={wait_until}, goto_timeout={goto_timeout}, "
-            f"wait_for_timeout={wait_for_timeout}"
-        )
+        print(f"[scrape_content] {url} (method={method})")
 
         # Determine permissions based on extraction method
         permissions = []
@@ -206,16 +199,13 @@ class Scraper:
         page = context.new_page()
 
         try:
-            print(f"[scrape_content] Navigating to {url}...")
             page.goto(url, wait_until=wait_until, timeout=goto_timeout)
-            print("[scrape_content] Page loaded")
 
             # Handle site-specific setup (cookie consent, etc.)
             self._dismiss_cookie_banner(page, config)
 
             # Wait for content to be ready
             if wait_for:
-                print(f"[scrape_content] Waiting for selector: {wait_for}")
                 page.wait_for_selector(
                     wait_for, state="visible", timeout=wait_for_timeout
                 )
@@ -223,16 +213,14 @@ class Scraper:
 
             # Extract content based on method
             if method == "click_copy":
-                print(f"[scrape_content] Clicking copy button: {selector}")
                 page.click(selector)
                 page.wait_for_timeout(1000)
                 content = page.evaluate("() => navigator.clipboard.readText()")
             else:  # inner_html
-                print(f"[scrape_content] Extracting innerHTML: {selector}")
                 element = page.query_selector(selector)
                 content = element.inner_html() if element else ""
 
-            print(f"[scrape_content] SUCCESS: extracted {len(content)} chars")
+            print(f"[scrape_content] OK {len(content):,} chars")
 
             # Clear error on success
             try:
@@ -243,8 +231,8 @@ class Scraper:
             return {"success": True, "content": content, "url": url}
 
         except Exception as e:
-            error_msg = str(e)
-            print(f"[scrape_content] ERROR: {error_msg}")
+            error_msg = str(e)[:200]  # Truncate long errors
+            print(f"[scrape_content] FAIL {error_msg}")
 
             # Track error
             try:
@@ -264,7 +252,6 @@ class Scraper:
     @modal.method()
     def scrape_links_browser(self, site_id: str) -> dict:
         """Scrape links from a site using browser (for JS-heavy SPAs)."""
-        print(f"[scrape_links_browser] site_id={site_id}")
         sites_config = load_sites_config()
         config = sites_config.get(site_id)
         if not config:
@@ -280,11 +267,7 @@ class Scraper:
         goto_timeout = links_config.get("gotoTimeoutMs", 30000)
         pattern = links_config.get("pattern", "")
 
-        print(
-            f"[scrape_links_browser] base_url={base_url}, pattern={pattern}, "
-            f"wait_for={wait_for}, wait_until={wait_until}, goto_timeout={goto_timeout}, "
-            f"wait_for_timeout={wait_for_timeout}"
-        )
+        print(f"[scrape_links_browser] {base_url} ({len(start_urls)} start URLs)")
 
         context = self.browser.new_context()
         page = context.new_page()
@@ -294,27 +277,22 @@ class Scraper:
 
             for start_path in start_urls or [""]:
                 start_url = base_url + start_path
-                print(f"[scrape_links_browser] Navigating to {start_url}...")
                 page.goto(start_url, wait_until=wait_until, timeout=goto_timeout)
-                print("[scrape_links_browser] Page loaded")
 
                 # Handle site-specific setup
                 self._dismiss_cookie_banner(page, config)
 
                 # Wait for content
                 if wait_for:
-                    print(f"[scrape_links_browser] Waiting for selector: {wait_for}")
                     page.wait_for_selector(
                         wait_for, state="visible", timeout=wait_for_timeout
                     )
                     page.wait_for_timeout(2000)
 
                 # Extract all links
-                print("[scrape_links_browser] Extracting links...")
                 raw_links = page.eval_on_selector_all(
                     "a[href]", "elements => elements.map(e => e.href)"
                 )
-                print(f"[scrape_links_browser] Found {len(raw_links)} raw links")
 
                 for link in raw_links:
                     clean = clean_url(link)
@@ -327,13 +305,11 @@ class Scraper:
                     ):
                         all_links.add(clean)
 
-            print(
-                f"[scrape_links_browser] SUCCESS: {len(all_links)} links after filtering"
-            )
+            print(f"[scrape_links_browser] OK {len(all_links)} links")
             return {"success": True, "links": sorted(all_links)}
 
         except Exception as e:
-            print(f"[scrape_links_browser] ERROR: {e}")
+            print(f"[scrape_links_browser] FAIL {str(e)[:200]}")
             return {"success": False, "error": str(e)}
         finally:
             context.close()
@@ -383,7 +359,7 @@ async def scrape_links_fetch(site_id: str) -> dict:
                     resp.raise_for_status()
                     return resp.text
                 except Exception as e:
-                    print(f"Error fetching {url}: {e}")
+                    print(f"[scrape_links_fetch] FAIL {url}: {str(e)[:100]}")
                     return ""
 
             tasks = [fetch_one(url) for url, _ in batch]
@@ -401,7 +377,7 @@ async def scrape_links_fetch(site_id: str) -> dict:
                     if depth < max_depth and link not in visited:
                         to_visit.append((link, depth + 1))
 
-    print(f"Found {len(all_links)} links for {site_id}")
+    print(f"[scrape_links_fetch] OK {len(all_links)} links for {site_id}")
     return {"success": True, "links": sorted(all_links)}
 
 
