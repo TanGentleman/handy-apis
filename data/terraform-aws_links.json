@@ -1,5 +1,5 @@
 {
-  "terraform_aws_links": [
+  "terraform-aws_links": [
     "https://registry.terraform.io/providers/hashicorp/aws/latest/docs",
     "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/apigatewayv2_api",
     "https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/cognito_user_pools",
