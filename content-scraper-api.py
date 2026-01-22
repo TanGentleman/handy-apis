@@ -250,11 +250,7 @@ class Scraper:
             context.close()
 
     def _detect_framework(self, page) -> str:
-        """Detect documentation framework from page metadata and structure.
-
-        Returns:
-            Framework name (docusaurus, mintlify, gitbook, readme, vitepress) or "unknown"
-        """
+        """Detect docs framework (docusaurus, mintlify, gitbook, readme, vitepress)."""
         framework_indicators = {
             "docusaurus": [
                 'meta[name="generator"][content*="Docusaurus"]',
@@ -291,15 +287,7 @@ class Scraper:
         return "unknown"
 
     def _test_copy_button(self, url: str, selector: str) -> dict:
-        """Test if a copy button selector works by clicking it and reading clipboard.
-
-        Args:
-            url: Page URL to test
-            selector: Button selector to test
-
-        Returns:
-            Dict with selector, chars count, and works status (or error)
-        """
+        """Test a copy button by clicking and reading clipboard."""
         try:
             test_context = self.browser.new_context(
                 permissions=["clipboard-read", "clipboard-write"]
@@ -327,11 +315,7 @@ class Scraper:
         return {"selector": selector, "works": False}
 
     def _find_copy_buttons(self, page, url: str) -> list[dict]:
-        """Find and test copy button selectors on the page.
-
-        Returns:
-            List of dicts with selector, chars (if works), and works status
-        """
+        """Find and test copy button selectors on the page."""
         copy_button_patterns = [
             "//button[@aria-label='Copy page']",
             "//button[@title='Copy page']",
@@ -356,12 +340,7 @@ class Scraper:
         return copy_buttons
 
     def _find_content_selectors(self, page) -> list[dict]:
-        """Find and rank content selectors by quality.
-
-        Returns:
-            List of dicts with selector, chars, text_chars, and recommended flag,
-            sorted by quality (recommended first, then by text length)
-        """
+        """Find and rank content selectors by quality."""
         candidate_selectors = [
             "main article .theme-doc-markdown",  # Docusaurus
             "main article",                      # Mintlify/common
@@ -406,11 +385,7 @@ class Scraper:
         return content_selectors
 
     def _analyze_links(self, page, url: str) -> dict:
-        """Analyze internal links and detect common path patterns.
-
-        Returns:
-            Dict with total_internal_links, sample_links, and path_patterns
-        """
+        """Analyze internal links and detect common path patterns."""
         try:
             all_links = page.eval_on_selector_all(
                 "a[href]", "elements => elements.map(e => e.href)"
@@ -462,14 +437,7 @@ class Scraper:
         }
 
     def _suggest_base_url(self, url: str) -> str:
-        """Suggest base URL for API configuration based on input URL structure.
-
-        Args:
-            url: Full documentation page URL
-
-        Returns:
-            Suggested base URL (e.g., "https://example.com/docs")
-        """
+        """Extract base URL from full page URL."""
         parsed_url = urlparse(url)
         base_url = f"{parsed_url.scheme}://{parsed_url.netloc}"
 
@@ -483,27 +451,9 @@ class Scraper:
 
     @modal.method()
     def discover_selectors(self, url: str) -> dict:
-        """Analyze a documentation page and suggest configuration for scraping.
+        """Analyze a docs page and suggest scraping config.
 
-        This method performs comprehensive analysis:
-        1. Framework detection (Docusaurus, Mintlify, GitBook, etc.)
-        2. Copy button discovery and testing
-        3. Content selector identification and ranking
-        4. Link pattern analysis
-        5. Base URL suggestion
-
-        Args:
-            url: Full URL of a documentation page to analyze
-
-        Returns:
-            Dict containing:
-            - success: bool
-            - framework: detected framework name
-            - base_url_suggestion: suggested baseUrl for config
-            - copy_buttons: list of copy button results (tested)
-            - content_selectors: list of ranked content selectors
-            - link_analysis: dict with links and patterns
-            - error: error message (if success=False)
+        Returns framework, copy_buttons, content_selectors, link_analysis, base_url_suggestion.
         """
         print(f"[discover_selectors] Analyzing {url}")
 
@@ -726,49 +676,13 @@ async def get_sites():
 async def discover_site(
     url: str = Query(
         description="Full URL of a documentation page to analyze",
-        example="https://developers.example.com/docs/getting-started"
+        examples=["https://developers.example.com/docs/getting-started"],
     )
 ):
     """Analyze a documentation page and suggest scraping configuration.
 
-    This endpoint performs comprehensive analysis to help onboard new documentation sites:
-
-    **Analysis includes:**
-    - Framework detection (Docusaurus, Mintlify, GitBook, VitePress, etc.)
-    - Copy button discovery with live testing (clicks button, reads clipboard)
-    - Content selector identification ranked by quality
-    - Internal link pattern analysis
-    - Base URL suggestion for configuration
-
-    **Returns:**
-    ```json
-    {
-      "success": true,
-      "url": "https://...",
-      "framework": "docusaurus",
-      "base_url_suggestion": "https://example.com/docs",
-      "copy_buttons": [
-        {"selector": "...", "chars": 5000, "works": true}
-      ],
-      "content_selectors": [
-        {"selector": "main article", "text_chars": 5000, "recommended": true}
-      ],
-      "link_analysis": {
-        "total_internal_links": 150,
-        "sample_links": ["https://..."],
-        "path_patterns": [["/docs/", 120]]
-      }
-    }
-    ```
-
-    **Typical workflow:**
-    1. Call this endpoint with any docs page URL
-    2. Review suggested selectors and config
-    3. Add configuration to sites.json
-    4. Test with /sites/{site_id}/links and /sites/{site_id}/content
-
-    **Error responses:**
-    - 500: Page failed to load or analysis error
+    Detects framework, tests copy buttons, ranks content selectors, and analyzes link patterns.
+    See CLAUDE.md for usage workflow.
     """
     scraper = Scraper()
     result = await scraper.discover_selectors.remote.aio(url)
