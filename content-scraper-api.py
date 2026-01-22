@@ -250,6 +250,206 @@ class Scraper:
             context.close()
 
     @modal.method()
+    def discover_selectors(self, url: str) -> dict:
+        """Analyze a page and suggest selectors for both links and content."""
+        print(f"[discover_selectors] Analyzing {url}")
+
+        context = self.browser.new_context()
+        page = context.new_page()
+
+        try:
+            page.goto(url, wait_until="domcontentloaded", timeout=30000)
+            page.wait_for_timeout(2000)  # Let JS render
+
+            # --- Detect Framework ---
+            framework = "unknown"
+            framework_indicators = {
+                "docusaurus": [
+                    'meta[name="generator"][content*="Docusaurus"]',
+                    'div[class*="docusaurus"]',
+                    '.theme-doc-markdown'
+                ],
+                "mintlify": [
+                    'meta[name="generator"][content*="Mintlify"]',
+                    'div[id="__next"]',
+                    'button[aria-label="Copy page"]'
+                ],
+                "gitbook": [
+                    'meta[name="generator"][content*="GitBook"]',
+                    '.gitbook-markdown'
+                ],
+                "readme": [
+                    'meta[name="generator"][content*="readme"]',
+                    '.markdown-body'
+                ]
+            }
+
+            for fw_name, selectors in framework_indicators.items():
+                for selector in selectors:
+                    if page.query_selector(selector):
+                        framework = fw_name
+                        break
+                if framework != "unknown":
+                    break
+
+            # --- Find Copy Buttons ---
+            copy_buttons = []
+            copy_button_patterns = [
+                "//button[@aria-label='Copy page']",
+                "//button[@title='Copy page']",
+                "//button[.//span[contains(text(), 'Copy page')]]",
+                "//button[contains(., 'Copy page')]",
+                "button[type='button']:has(div:has-text('Copy as Markdown'))",
+                "#page-context-menu-button"
+            ]
+
+            for pattern in copy_button_patterns:
+                try:
+                    elements = page.locator(pattern).all()
+                    if elements:
+                        # Test if button works
+                        try:
+                            test_context = self.browser.new_context(
+                                permissions=["clipboard-read", "clipboard-write"]
+                            )
+                            test_page = test_context.new_page()
+                            test_page.goto(url, wait_until="domcontentloaded", timeout=30000)
+                            test_page.wait_for_timeout(1000)
+                            test_page.click(pattern, timeout=5000)
+                            test_page.wait_for_timeout(1000)
+                            content = test_page.evaluate("() => navigator.clipboard.readText()")
+                            test_context.close()
+
+                            if content and len(content) > 500:
+                                copy_buttons.append({
+                                    "selector": pattern,
+                                    "chars": len(content),
+                                    "works": True
+                                })
+                        except Exception as e:
+                            copy_buttons.append({
+                                "selector": pattern,
+                                "error": str(e)[:100],
+                                "works": False
+                            })
+                except Exception:
+                    pass
+
+            # --- Find Content Selectors ---
+            content_selectors = []
+            candidate_selectors = [
+                "main article .theme-doc-markdown",  # Docusaurus
+                "main article",                      # Mintlify/common
+                ".markdown-body",                    # GitHub-style
+                ".gitbook-markdown",                 # GitBook
+                "#mainContent",                      # Datadog
+                "#provider-docs-content",            # Terraform
+                "[role='main']",                     # Semantic HTML
+                "main",
+                "article",
+                ".content",
+                "#content"
+            ]
+
+            for selector in candidate_selectors:
+                try:
+                    element = page.query_selector(selector)
+                    if element:
+                        html = element.inner_html()
+                        text = element.inner_text()
+
+                        # Only consider if has substantial content
+                        if len(text) > 500:
+                            content_selectors.append({
+                                "selector": selector,
+                                "chars": len(html),
+                                "text_chars": len(text),
+                                "recommended": len(text) > 1000 and len(text) < 50000
+                            })
+                except Exception:
+                    pass
+
+            # Sort by likelihood (text length in reasonable range)
+            content_selectors.sort(
+                key=lambda x: (x["recommended"], x["text_chars"]),
+                reverse=True
+            )
+
+            # --- Analyze Links ---
+            all_links = page.eval_on_selector_all(
+                "a[href]", "elements => elements.map(e => e.href)"
+            )
+
+            parsed_url = urlparse(url)
+            base_url = f"{parsed_url.scheme}://{parsed_url.netloc}"
+
+            # Clean and categorize links
+            internal_links = []
+            for link in all_links:
+                clean = clean_url(link)
+                link_parsed = urlparse(clean)
+
+                # Only internal links
+                if link_parsed.netloc == parsed_url.netloc:
+                    internal_links.append(clean)
+
+            internal_links = sorted(set(internal_links))
+
+            # Detect common path patterns
+            path_patterns = {}
+            for link in internal_links:
+                path = urlparse(link).path
+                # Extract pattern (e.g., /docs/, /api/, etc.)
+                parts = [p for p in path.split('/') if p]
+                if parts:
+                    pattern = f"/{parts[0]}/"
+                    path_patterns[pattern] = path_patterns.get(pattern, 0) + 1
+
+            # Sort patterns by frequency
+            sorted_patterns = sorted(
+                path_patterns.items(),
+                key=lambda x: x[1],
+                reverse=True
+            )
+
+            # Get base URL suggestion
+            if parsed_url.path and parsed_url.path != '/':
+                # Find common prefix among internal links
+                path_parts = [p for p in parsed_url.path.split('/') if p]
+                if path_parts:
+                    suggested_base = f"{base_url}/{path_parts[0]}"
+                else:
+                    suggested_base = base_url
+            else:
+                suggested_base = base_url
+
+            result = {
+                "success": True,
+                "url": url,
+                "framework": framework,
+                "base_url_suggestion": suggested_base,
+                "copy_buttons": copy_buttons[:5],  # Top 5
+                "content_selectors": content_selectors[:10],  # Top 10
+                "link_analysis": {
+                    "total_internal_links": len(internal_links),
+                    "sample_links": internal_links[:20],
+                    "path_patterns": sorted_patterns[:10]
+                }
+            }
+
+            print(f"[discover_selectors] OK - framework={framework}, "
+                  f"{len(copy_buttons)} copy buttons, "
+                  f"{len(content_selectors)} content selectors")
+
+            return result
+
+        except Exception as e:
+            print(f"[discover_selectors] FAIL {str(e)[:200]}")
+            return {"success": False, "error": str(e)}
+        finally:
+            context.close()
+
+    @modal.method()
     def scrape_links_browser(self, site_id: str) -> dict:
         """Scrape links from a site using browser (for JS-heavy SPAs)."""
         sites_config = load_sites_config()
@@ -394,6 +594,7 @@ async def root():
         "storage": "Modal Dict (7-day TTL)",
         "endpoints": {
             "/sites": "GET - List available site IDs",
+            "/discover": "GET - Analyze a page and suggest selectors (url param)",
             "/sites/{site_id}/links": "GET - Get all doc links for a site (cached)",
             "/sites/{site_id}/content": "GET - Get content from a page (cached, max_age=0 to force)",
             "/sites/{site_id}/index": "POST - Fetch all pages in parallel",
@@ -422,6 +623,25 @@ async def get_sites():
     """List all available site IDs."""
     sites_config = load_sites_config()
     return {"sites": list(sites_config.keys()), "count": len(sites_config)}
+
+
+@web_app.get("/discover")
+async def discover_site(url: str = Query(description="URL of documentation page to analyze")):
+    """Analyze a documentation page and suggest configuration.
+
+    Returns:
+    - Framework detection (Docusaurus, Mintlify, GitBook, etc.)
+    - Working copy buttons (tested)
+    - Content selectors ranked by quality
+    - Link patterns and base URL suggestions
+    """
+    scraper = Scraper()
+    result = await scraper.discover_selectors.remote.aio(url)
+
+    if not result["success"]:
+        raise HTTPException(status_code=500, detail=result.get("error"))
+
+    return result
 
 
 @web_app.get("/sites/{site_id}/links")

@@ -197,6 +197,140 @@ def cmd_index(site_id: str, max_concurrent: int = 50):
             print(f"  {err['path']}: {err['error']}", file=sys.stderr)
 
 
+def cmd_discover(url: str):
+    """Analyze a documentation page and suggest configuration."""
+    print(f"Analyzing {url}...\n", file=sys.stderr)
+
+    resp = httpx.get(
+        f"{API_BASE}/discover",
+        params={"url": url},
+        headers=get_auth_headers(),
+        timeout=60.0,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+
+    # Parse URL for suggestions
+    from urllib.parse import urlparse
+    parsed = urlparse(url)
+    base_domain = parsed.netloc
+
+    print("=" * 70)
+    print(f"DISCOVERY RESULTS FOR: {url}")
+    print("=" * 70)
+
+    # Framework detection
+    print(f"\n🔍 Framework Detected: {data['framework'].upper()}")
+    print(f"🌐 Suggested Base URL: {data['base_url_suggestion']}")
+
+    # Copy buttons
+    print("\n📋 COPY BUTTONS:")
+    copy_buttons = data.get("copy_buttons", [])
+    if copy_buttons:
+        for i, btn in enumerate(copy_buttons, 1):
+            if btn.get("works"):
+                print(f"  ✅ {i}. {btn['selector']}")
+                print(f"      → Tested: {btn['chars']:,} chars")
+            else:
+                print(f"  ❌ {i}. {btn['selector']}")
+                print(f"      → Error: {btn.get('error', 'unknown')[:60]}")
+    else:
+        print("  ℹ️  No copy buttons found")
+
+    # Content selectors
+    print("\n📄 CONTENT SELECTORS (ranked):")
+    content_selectors = data.get("content_selectors", [])
+    if content_selectors:
+        for i, sel in enumerate(content_selectors[:5], 1):
+            star = "⭐" if sel.get("recommended") else "  "
+            print(f"  {star} {i}. {sel['selector']}")
+            print(f"      → {sel['text_chars']:,} text chars ({sel['chars']:,} HTML chars)")
+    else:
+        print("  ⚠️  No content selectors found")
+
+    # Link analysis
+    link_data = data.get("link_analysis", {})
+    print(f"\n🔗 LINK ANALYSIS:")
+    print(f"  Total internal links: {link_data.get('total_internal_links', 0)}")
+
+    print("\n  Path patterns (frequency):")
+    patterns = link_data.get("path_patterns", [])
+    if patterns:
+        for pattern, count in patterns[:5]:
+            print(f"    • {pattern} ({count} links)")
+    else:
+        print("    ℹ️  No patterns detected")
+
+    print("\n  Sample links:")
+    samples = link_data.get("sample_links", [])
+    for link in samples[:5]:
+        print(f"    • {link}")
+
+    # Suggested config
+    print("\n" + "=" * 70)
+    print("💡 SUGGESTED CONFIG SNIPPET:")
+    print("=" * 70)
+
+    # Determine best content method
+    if copy_buttons and any(b.get("works") for b in copy_buttons):
+        best_copy = next(b for b in copy_buttons if b.get("works"))
+        content_config = f'''
+  "content": {{
+    "mode": "browser",
+    "waitFor": "{best_copy['selector']}",
+    "selector": "{best_copy['selector']}",
+    "method": "click_copy"
+  }}'''
+    elif content_selectors:
+        best_selector = content_selectors[0]
+        content_config = f'''
+  "content": {{
+    "mode": "browser",
+    "waitFor": "{best_selector['selector']}",
+    "selector": "{best_selector['selector']}",
+    "method": "inner_html"
+  }}'''
+    else:
+        content_config = '''
+  "content": {
+    "mode": "browser",
+    "selector": "main",
+    "method": "inner_html"
+  }'''
+
+    # Determine link config
+    if patterns:
+        best_pattern = patterns[0][0].rstrip('/')
+        link_config = f'''
+  "links": {{
+    "startUrls": [""],
+    "pattern": "{best_pattern}",
+    "maxDepth": 2
+  }}'''
+    else:
+        link_config = f'''
+  "links": {{
+    "startUrls": [""],
+    "pattern": "{parsed.path.split('/')[1] if parsed.path else ''}",
+    "maxDepth": 2
+  }}'''
+
+    print(f'''
+"your-site-id": {{
+  "name": "Your Site Name",
+  "baseUrl": "{data['base_url_suggestion']}",
+  "mode": "fetch",{link_config},{content_config}
+}}
+''')
+
+    print("=" * 70)
+    print("\n✨ Next steps:")
+    print("  1. Copy the config above to scraper/config/sites.json")
+    print("  2. Test with: python docpull.py links your-site-id")
+    print("  3. Test with: python docpull.py content your-site-id <path>")
+    print("=" * 70)
+
+
 def cmd_cache(action: str = "stats", site_id: str = None):
     """Manage cache: stats, clear <site_id>, or clear-all."""
     if action == "stats":
@@ -224,6 +358,7 @@ def print_usage():
 
 Commands:
   sites                            List all available site IDs
+  discover <url>                   Analyze a docs page and suggest selectors
   links <site_id>                  Get all doc links for a site
   links <site_id> --save           Also save links to ./data/<site_id>_links.json
   links <site_id> --force          Force fresh crawl (bypass cache)
@@ -235,6 +370,7 @@ Commands:
 
 Examples:
   docpull sites
+  docpull discover https://developers.whatnot.com/docs/getting-started
   docpull links cursor --save
   docpull content modal /guide
   docpull index modal
@@ -251,6 +387,8 @@ def main():
 
     if cmd == "sites":
         cmd_sites()
+    elif cmd == "discover" and len(sys.argv) >= 3:
+        cmd_discover(sys.argv[2])
     elif cmd == "links" and len(sys.argv) >= 3:
         save = "--save" in sys.argv
         force = "--force" in sys.argv
