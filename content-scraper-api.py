@@ -5,14 +5,17 @@
 # Content Scraper API - Modal-native with Dict caching and browser lifecycle
 
 import asyncio
+import io
 import json
 import re
 import time
+import zipfile
 from pathlib import Path
 from urllib.parse import urljoin, urlparse
 
 import modal
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 # Modal image with Playwright
@@ -101,6 +104,77 @@ def extract_links_from_html(html: str, base_url: str, pattern: str) -> list[str]
             links.add(link)
 
     return sorted(links)
+
+
+def html_to_markdown(html: str) -> str:
+    """Convert HTML to markdown."""
+    md = html
+    # Headers
+    for i in range(1, 7):
+        md = re.sub(
+            rf"<h{i}[^>]*>(.*?)</h{i}>",
+            rf"\n{'#' * i} \1\n\n",
+            md,
+            flags=re.DOTALL | re.IGNORECASE,
+        )
+    # Code blocks
+    md = re.sub(
+        r"<pre[^>]*><code[^>]*>(.*?)</code></pre>",
+        r"\n```\n\1\n```\n\n",
+        md,
+        flags=re.DOTALL,
+    )
+    md = re.sub(r"<pre[^>]*>(.*?)</pre>", r"\n```\n\1\n```\n\n", md, flags=re.DOTALL)
+    md = re.sub(r"<code[^>]*>(.*?)</code>", r"`\1`", md, flags=re.DOTALL)
+    # Bold/italic
+    md = re.sub(
+        r"<(strong|b)[^>]*>(.*?)</\1>", r"**\2**", md, flags=re.DOTALL | re.IGNORECASE
+    )
+    md = re.sub(
+        r"<(em|i)[^>]*>(.*?)</\1>", r"*\2*", md, flags=re.DOTALL | re.IGNORECASE
+    )
+    # Links
+    md = re.sub(
+        r'<a[^>]*href="([^"]*)"[^>]*>(.*?)</a>', r"[\2](\1)", md, flags=re.DOTALL
+    )
+
+    # Lists
+    def convert_list(m, marker_fn):
+        items = re.findall(r"<li[^>]*>(.*?)</li>", m.group(1), flags=re.DOTALL)
+        return (
+            "\n"
+            + "\n".join(marker_fn(i, item.strip()) for i, item in enumerate(items))
+            + "\n\n"
+        )
+
+    md = re.sub(
+        r"<ul[^>]*>(.*?)</ul>",
+        lambda m: convert_list(m, lambda i, t: f"- {t}"),
+        md,
+        flags=re.DOTALL,
+    )
+    md = re.sub(
+        r"<ol[^>]*>(.*?)</ol>",
+        lambda m: convert_list(m, lambda i, t: f"{i + 1}. {t}"),
+        md,
+        flags=re.DOTALL,
+    )
+    # Paragraphs/breaks
+    md = re.sub(r"<p[^>]*>(.*?)</p>", r"\1\n\n", md, flags=re.DOTALL)
+    md = re.sub(r"<br\s*/?>", "\n", md)
+    # Strip remaining tags
+    md = re.sub(r"<[^>]+>", "", md)
+    # Cleanup
+    md = re.sub(r"\n{3,}", "\n\n", md)
+    md = re.sub(r"Copy\n", "", md)
+    md = (
+        md.replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&amp;", "&")
+        .replace("&quot;", '"')
+        .replace("&#39;", "'")
+    )
+    return md.strip()
 
 
 # --- Browser-based Scraper with Lifecycle ---
@@ -637,7 +711,7 @@ async def root():
     """API root with endpoint documentation."""
     return {
         "name": "Content Scraper API",
-        "version": "6.0",
+        "version": "6.1",
         "storage": "Modal Dict (7-day TTL)",
         "endpoints": {
             "/sites": "GET - List available site IDs",
@@ -645,6 +719,7 @@ async def root():
             "/sites/{site_id}/links": "GET - Get all doc links for a site (cached)",
             "/sites/{site_id}/content": "GET - Get content from a page (cached, max_age=0 to force)",
             "/sites/{site_id}/index": "POST - Fetch all pages in parallel",
+            "/sites/{site_id}/download": "GET - Download all docs as ZIP file",
             "/cache/stats": "GET - Get cache statistics",
             "/cache/{site_id}": "DELETE - Clear cache for a site",
             "/errors": "GET/DELETE - List or clear all error tracking",
@@ -655,6 +730,7 @@ async def root():
             "Content caching (1 hour default)",
             "Error tracking (skip after 3 failures, auto-expire 24h, force clears)",
             "Parallel bulk indexing (50 concurrent)",
+            "ZIP download with folder structure (like docpull.py --save)",
         ],
     }
 
@@ -1008,6 +1084,143 @@ async def index_site(
         "failed": failed,
         "errors": errors[:10],
     }
+
+
+@web_app.get("/sites/{site_id}/download")
+async def download_site(
+    site_id: str,
+    max_age: int = Query(
+        default=DEFAULT_MAX_AGE, description="Max cache age in seconds"
+    ),
+    max_concurrent: int = Query(default=50, description="Max concurrent requests"),
+):
+    """Download all documentation for a site as a ZIP file.
+
+    Creates a ZIP archive with all pages organized in folders matching the URL structure,
+    just like the --save option in docpull.py. Each page is saved as markdown.
+    """
+    sites_config = load_sites_config()
+    config = sites_config.get(site_id)
+    if not config:
+        raise HTTPException(status_code=404, detail=f"Unknown site: {site_id}")
+
+    print(f"[download_site] Starting download for {site_id}")
+
+    # Get all links first
+    links_response = await get_site_links(site_id, max_age=max_age)
+    links = links_response.links
+    base_url = config["baseUrl"]
+
+    # Extract paths from links
+    paths = []
+    for link in links:
+        if link.startswith(base_url):
+            path = link[len(base_url):]
+            paths.append(path)
+        else:
+            # Handle links with different scheme or www
+            link_parsed = urlparse(link)
+            base_parsed = urlparse(base_url)
+            if link_parsed.netloc == base_parsed.netloc:
+                paths.append(link_parsed.path)
+
+    print(f"[download_site] Found {len(paths)} pages to download")
+
+    # Fetch all content (similar to index endpoint)
+    scraper = Scraper()
+    semaphore = asyncio.Semaphore(max_concurrent)
+
+    async def fetch_content_for_path(path):
+        async with semaphore:
+            cache_key = f"{site_id}:{path}"
+            # Try cache first
+            try:
+                cached = cache[cache_key]
+                if cached and (time.time() - cached["timestamp"]) < max_age:
+                    return {
+                        "path": path,
+                        "content": cached["content"],
+                        "success": True,
+                        "from_cache": True
+                    }
+            except KeyError:
+                pass
+
+            # Scrape if not cached
+            result = await scraper.scrape_content.remote.aio(site_id, path)
+            if result.get("success"):
+                return {
+                    "path": path,
+                    "content": result["content"],
+                    "success": True,
+                    "from_cache": False
+                }
+            else:
+                return {
+                    "path": path,
+                    "error": result.get("error", "Unknown error"),
+                    "success": False
+                }
+
+    tasks = [fetch_content_for_path(path) for path in paths]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    print(f"[download_site] Fetched content, creating ZIP")
+
+    # Create ZIP file in memory
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
+        successful_count = 0
+        failed_count = 0
+
+        for result in results:
+            if isinstance(result, Exception):
+                failed_count += 1
+                continue
+
+            if not isinstance(result, dict) or not result.get("success"):
+                failed_count += 1
+                continue
+
+            path = result["path"]
+            content = result["content"]
+
+            # Convert HTML to markdown if needed
+            if content.lstrip().startswith("<"):
+                content = html_to_markdown(content)
+
+            # Sanitize path for filename - create proper folder structure
+            safe_path = path.strip("/").replace("//", "/") or "index"
+
+            # Create the file path within the ZIP: site_id/path.md
+            zip_path = f"{site_id}/{safe_path}.md"
+
+            # Add to ZIP
+            zip_file.writestr(zip_path, content)
+            successful_count += 1
+
+        # Add a README with metadata
+        readme_content = f"""# {config.get('name', site_id)} Documentation
+
+Downloaded from: {base_url}
+Total pages: {len(paths)}
+Successfully downloaded: {successful_count}
+Failed: {failed_count}
+Generated: {time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime())}
+"""
+        zip_file.writestr(f"{site_id}/README.md", readme_content)
+
+    print(f"[download_site] ZIP created - {successful_count} pages, {failed_count} failed")
+
+    # Return ZIP file
+    zip_buffer.seek(0)
+    return StreamingResponse(
+        io.BytesIO(zip_buffer.read()),
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f"attachment; filename={site_id}_docs.zip"
+        }
+    )
 
 
 @app.function()
