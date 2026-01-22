@@ -4,6 +4,8 @@
 import os
 import re
 import sys
+from urllib.parse import urlparse
+
 import httpx
 
 try:
@@ -198,136 +200,207 @@ def cmd_index(site_id: str, max_concurrent: int = 50):
 
 
 def cmd_discover(url: str):
-    """Analyze a documentation page and suggest configuration."""
+    """Analyze a documentation page and suggest configuration.
+
+    Args:
+        url: Full URL of a documentation page to analyze
+
+    Prints comprehensive discovery results including:
+    - Framework detection
+    - Working copy buttons
+    - Ranked content selectors
+    - Link patterns
+    - Ready-to-use configuration snippet
+    """
+    # Validate URL format
+    parsed = urlparse(url)
+    if not parsed.scheme or not parsed.netloc:
+        print(f"Error: Invalid URL format: {url}", file=sys.stderr)
+        print("URL must include protocol (e.g., https://example.com)", file=sys.stderr)
+        sys.exit(1)
+
+    if parsed.scheme not in ('http', 'https'):
+        print(f"Error: Unsupported protocol: {parsed.scheme}", file=sys.stderr)
+        print("Only http:// and https:// URLs are supported", file=sys.stderr)
+        sys.exit(1)
+
     print(f"Analyzing {url}...\n", file=sys.stderr)
 
-    resp = httpx.get(
-        f"{API_BASE}/discover",
-        params={"url": url},
-        headers=get_auth_headers(),
-        timeout=60.0,
-    )
-    resp.raise_for_status()
-    data = resp.json()
+    try:
+        resp = httpx.get(
+            f"{API_BASE}/discover",
+            params={"url": url},
+            headers=get_auth_headers(),
+            timeout=60.0,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+    except httpx.HTTPStatusError as e:
+        print(f"Error: HTTP {e.response.status_code}", file=sys.stderr)
+        try:
+            error_detail = e.response.json().get("detail", str(e))
+            print(f"Details: {error_detail}", file=sys.stderr)
+        except Exception:
+            print(f"Details: {e}", file=sys.stderr)
+        sys.exit(1)
+    except httpx.TimeoutException:
+        print("Error: Request timed out (60s)", file=sys.stderr)
+        print("The page may be slow to load or unresponsive", file=sys.stderr)
+        sys.exit(1)
+    except httpx.HTTPError as e:
+        print(f"Error: Failed to connect to API: {e}", file=sys.stderr)
+        sys.exit(1)
 
-    # Parse URL for suggestions
-    from urllib.parse import urlparse
+    # Parse URL for fallback suggestions
     parsed = urlparse(url)
-    base_domain = parsed.netloc
 
     print("=" * 70)
     print(f"DISCOVERY RESULTS FOR: {url}")
     print("=" * 70)
 
     # Framework detection
-    print(f"\n🔍 Framework Detected: {data['framework'].upper()}")
-    print(f"🌐 Suggested Base URL: {data['base_url_suggestion']}")
+    framework = data.get('framework', 'unknown')
+    print(f"\nFramework Detected: {framework.upper()}")
+    print(f"Suggested Base URL: {data['base_url_suggestion']}")
 
-    # Copy buttons
-    print("\n📋 COPY BUTTONS:")
+    # Copy buttons section
+    print("\n" + "-" * 70)
+    print("COPY BUTTONS (tested with live page load):")
+    print("-" * 70)
     copy_buttons = data.get("copy_buttons", [])
     if copy_buttons:
-        for i, btn in enumerate(copy_buttons, 1):
-            if btn.get("works"):
-                print(f"  ✅ {i}. {btn['selector']}")
-                print(f"      → Tested: {btn['chars']:,} chars")
-            else:
-                print(f"  ❌ {i}. {btn['selector']}")
-                print(f"      → Error: {btn.get('error', 'unknown')[:60]}")
-    else:
-        print("  ℹ️  No copy buttons found")
+        working_buttons = [b for b in copy_buttons if b.get("works")]
+        if working_buttons:
+            print(f"\n  Found {len(working_buttons)} working copy button(s):\n")
+            for i, btn in enumerate(working_buttons, 1):
+                print(f"  {i}. {btn['selector']}")
+                print(f"     Tested: {btn['chars']:,} chars extracted\n")
 
-    # Content selectors
-    print("\n📄 CONTENT SELECTORS (ranked):")
+        failed_buttons = [b for b in copy_buttons if not b.get("works")]
+        if failed_buttons:
+            print(f"  Found {len(failed_buttons)} non-working button(s):")
+            for btn in failed_buttons:
+                error = btn.get('error', 'unknown')[:60]
+                print(f"    - {btn['selector']} (Error: {error})")
+    else:
+        print("  No copy buttons detected")
+
+    # Content selectors section
+    print("\n" + "-" * 70)
+    print("CONTENT SELECTORS (ranked by quality):")
+    print("-" * 70)
     content_selectors = data.get("content_selectors", [])
     if content_selectors:
+        print(f"\n  Found {len(content_selectors)} viable selector(s):\n")
         for i, sel in enumerate(content_selectors[:5], 1):
-            star = "⭐" if sel.get("recommended") else "  "
-            print(f"  {star} {i}. {sel['selector']}")
-            print(f"      → {sel['text_chars']:,} text chars ({sel['chars']:,} HTML chars)")
+            marker = "[RECOMMENDED]" if sel.get("recommended") else ""
+            print(f"  {i}. {sel['selector']} {marker}")
+            print(f"     {sel['text_chars']:,} text chars | {sel['chars']:,} HTML chars\n")
     else:
-        print("  ⚠️  No content selectors found")
+        print("  WARNING: No content selectors found with substantial content")
 
-    # Link analysis
+    # Link analysis section
     link_data = data.get("link_analysis", {})
-    print(f"\n🔗 LINK ANALYSIS:")
-    print(f"  Total internal links: {link_data.get('total_internal_links', 0)}")
+    total_links = link_data.get('total_internal_links', 0)
 
-    print("\n  Path patterns (frequency):")
+    print("-" * 70)
+    print(f"LINK ANALYSIS:")
+    print("-" * 70)
+    print(f"\n  Total internal links: {total_links}")
+
     patterns = link_data.get("path_patterns", [])
     if patterns:
+        print(f"\n  Path patterns (by frequency):")
         for pattern, count in patterns[:5]:
-            print(f"    • {pattern} ({count} links)")
+            pct = (count / total_links * 100) if total_links > 0 else 0
+            print(f"    {pattern:20} {count:4} links ({pct:.1f}%)")
     else:
-        print("    ℹ️  No patterns detected")
+        print("\n  No clear path patterns detected")
 
-    print("\n  Sample links:")
     samples = link_data.get("sample_links", [])
-    for link in samples[:5]:
-        print(f"    • {link}")
+    if samples:
+        print(f"\n  Sample links ({min(5, len(samples))} of {len(samples)}):")
+        for link in samples[:5]:
+            print(f"    {link}")
 
-    # Suggested config
+    # Generate suggested config
     print("\n" + "=" * 70)
-    print("💡 SUGGESTED CONFIG SNIPPET:")
+    print("SUGGESTED CONFIGURATION:")
     print("=" * 70)
 
-    # Determine best content method
+    # Determine best content extraction method
     if copy_buttons and any(b.get("works") for b in copy_buttons):
         best_copy = next(b for b in copy_buttons if b.get("works"))
-        content_config = f'''
-  "content": {{
+        content_config = f'''  "content": {{
     "mode": "browser",
     "waitFor": "{best_copy['selector']}",
     "selector": "{best_copy['selector']}",
     "method": "click_copy"
   }}'''
+        method_note = "  # Using copy button (most reliable)"
     elif content_selectors:
         best_selector = content_selectors[0]
-        content_config = f'''
-  "content": {{
+        content_config = f'''  "content": {{
     "mode": "browser",
     "waitFor": "{best_selector['selector']}",
     "selector": "{best_selector['selector']}",
     "method": "inner_html"
   }}'''
+        method_note = "  # Using content selector"
     else:
-        content_config = '''
-  "content": {
+        content_config = '''  "content": {
     "mode": "browser",
     "selector": "main",
     "method": "inner_html"
   }'''
+        method_note = "  # WARNING: Using fallback selector - may need adjustment"
 
-    # Determine link config
+    # Determine link crawling config
     if patterns:
         best_pattern = patterns[0][0].rstrip('/')
-        link_config = f'''
-  "links": {{
+        link_config = f'''  "links": {{
     "startUrls": [""],
     "pattern": "{best_pattern}",
     "maxDepth": 2
   }}'''
+        link_note = f"  # Pattern covers {patterns[0][1]} links"
     else:
-        link_config = f'''
-  "links": {{
+        fallback_pattern = f"/{parsed.path.split('/')[1]}" if parsed.path and len(parsed.path.split('/')) > 1 else ""
+        link_config = f'''  "links": {{
     "startUrls": [""],
-    "pattern": "{parsed.path.split('/')[1] if parsed.path else ''}",
+    "pattern": "{fallback_pattern}",
     "maxDepth": 2
   }}'''
+        link_note = "  # WARNING: No clear pattern found - verify this setting"
 
+    # Print final config
     print(f'''
 "your-site-id": {{
   "name": "Your Site Name",
   "baseUrl": "{data['base_url_suggestion']}",
-  "mode": "fetch",{link_config},{content_config}
+  "mode": "fetch",
+{link_config},
+{link_note}
+{content_config}
+{method_note}
 }}
 ''')
 
     print("=" * 70)
-    print("\n✨ Next steps:")
-    print("  1. Copy the config above to scraper/config/sites.json")
-    print("  2. Test with: python docpull.py links your-site-id")
-    print("  3. Test with: python docpull.py content your-site-id <path>")
+    print("NEXT STEPS:")
+    print("=" * 70)
+    print("""
+1. Review the suggested configuration above
+2. Add it to scraper/config/sites.json (replace 'your-site-id')
+3. Test link discovery:
+   python docpull.py links your-site-id
+
+4. Test content extraction (use a path from sample links):
+   python docpull.py content your-site-id <path>
+
+5. If tests pass, index the entire site:
+   python docpull.py index your-site-id
+""")
     print("=" * 70)
 
 
