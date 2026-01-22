@@ -4,6 +4,7 @@
 import os
 import re
 import sys
+import time
 from urllib.parse import urlparse
 
 import httpx
@@ -28,6 +29,43 @@ def get_auth_headers() -> dict:
     if key and secret:
         return {"Modal-Key": key, "Modal-Secret": secret}
     return {}
+
+
+def retry_request(func, max_retries: int = 4, initial_delay: float = 2.0):
+    """Retry a request with exponential backoff for cold start handling.
+
+    Args:
+        func: Function that makes the httpx request
+        max_retries: Maximum number of retry attempts (default: 4)
+        initial_delay: Initial delay in seconds (default: 2s)
+
+    Returns:
+        The response from the successful request
+
+    Raises:
+        The last exception if all retries fail
+    """
+    delay = initial_delay
+    last_exception = None
+
+    for attempt in range(max_retries + 1):
+        try:
+            return func()
+        except (httpx.ReadTimeout, httpx.ConnectTimeout) as e:
+            last_exception = e
+            if attempt < max_retries:
+                print(f"Request timed out (container cold start?), retrying in {delay}s... ({attempt + 1}/{max_retries})", file=sys.stderr)
+                time.sleep(delay)
+                delay *= 2  # Exponential backoff
+            else:
+                print(f"Request failed after {max_retries + 1} attempts", file=sys.stderr)
+                raise
+        except httpx.HTTPError as e:
+            # Don't retry on non-timeout HTTP errors
+            raise
+
+    # Should never reach here, but just in case
+    raise last_exception
 
 
 def html_to_markdown(html: str) -> str:
@@ -103,8 +141,16 @@ def html_to_markdown(html: str) -> str:
 
 def cmd_sites():
     """List all available site IDs."""
-    resp = httpx.get(f"{API_BASE}/sites", headers=get_auth_headers())
-    resp.raise_for_status()
+    def make_request():
+        resp = httpx.get(
+            f"{API_BASE}/sites",
+            headers=get_auth_headers(),
+            timeout=120.0,  # Allow time for cold starts
+        )
+        resp.raise_for_status()
+        return resp
+
+    resp = retry_request(make_request)
     sites = resp.json()["sites"]
     for s in sites:
         print(s)
@@ -407,8 +453,16 @@ def cmd_discover(url: str):
 def cmd_cache(action: str = "stats", site_id: str = None):
     """Manage cache: stats, clear <site_id>, or clear-all."""
     if action == "stats":
-        resp = httpx.get(f"{API_BASE}/cache/stats", headers=get_auth_headers())
-        resp.raise_for_status()
+        def make_request():
+            resp = httpx.get(
+                f"{API_BASE}/cache/stats",
+                headers=get_auth_headers(),
+                timeout=120.0,  # Allow time for cold starts
+            )
+            resp.raise_for_status()
+            return resp
+
+        resp = retry_request(make_request)
         data = resp.json()
         print(f"Total cache entries: {data['total_entries']}")
         print("\nBy type:")
@@ -418,8 +472,16 @@ def cmd_cache(action: str = "stats", site_id: str = None):
         for site, count in data["by_site"].items():
             print(f"  {site}: {count}")
     elif action == "clear" and site_id:
-        resp = httpx.delete(f"{API_BASE}/cache/{site_id}", headers=get_auth_headers())
-        resp.raise_for_status()
+        def make_request():
+            resp = httpx.delete(
+                f"{API_BASE}/cache/{site_id}",
+                headers=get_auth_headers(),
+                timeout=120.0,  # Allow time for cold starts
+            )
+            resp.raise_for_status()
+            return resp
+
+        resp = retry_request(make_request)
         print(f"Cleared {resp.json()['deleted']} cache entries for {site_id}")
     else:
         print("Usage: docpull cache stats")
