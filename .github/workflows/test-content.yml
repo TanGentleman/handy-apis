@@ -1,7 +1,7 @@
 # Test Content Workflow
 #
 # Fetches one piece of content from each configured site to verify the content endpoint.
-# Sites are tested in parallel using a matrix strategy.
+# Sites and test paths are read from sites.json and tested in parallel.
 
 name: Test Content
 
@@ -18,53 +18,54 @@ on:
           - dev
 
 jobs:
+  get-sites:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.sites.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build matrix from sites.json
+        id: sites
+        run: |
+          # Extract site IDs and testPaths directly from config file
+          MATRIX=$(jq -c '{include: [.sites | to_entries[] | {id: .key, testPath: .value.testPath}]}' scraper/config/sites.json)
+          echo "matrix=$MATRIX" >> $GITHUB_OUTPUT
+
   test-content:
+    needs: get-sites
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - site: modal
-            path: /guide/dicts
-          - site: convex
-            path: /functions/http-actions
-          - site: datadog
-            path: /tracing/trace_explorer
-          - site: terraform-aws
-            path: /resources/acm_certificate
-          - site: cursor
-            path: /agent/browser
-          - site: claude-platform
-            path: /agent-sdk/mcp
-          - site: claude-code
-            path: /headless
-          - site: unsloth
-            path: /basics/chat-templates
-          - site: playwright
-            path: /evaluating
+      matrix: ${{ fromJson(needs.get-sites.outputs.matrix) }}
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
-      - name: Install dependencies
-        run: pip install httpx
-
-      - name: Test content for ${{ matrix.site }}
+      - name: Test content for ${{ matrix.id }}
         env:
           ENVIRONMENT: ${{ inputs.environment || 'prod' }}
           MODAL_USERNAME: ${{ secrets.MODAL_USERNAME }}
           MODAL_KEY: ${{ secrets.MODAL_KEY }}
           MODAL_SECRET: ${{ secrets.MODAL_SECRET }}
         run: |
-          echo "Testing content endpoint for ${{ matrix.site }} (${{ matrix.path }})..."
-          OUTPUT=$(python docpull.py content "${{ matrix.site }}" "${{ matrix.path }}" --force)
-          echo "$OUTPUT"
-          CHARS=$(echo "$OUTPUT" | grep -oP '\(\K\d+(?= chars\))')
-          STATUS=$(echo "$OUTPUT" | grep -oP '\((fresh|cached)\)' | tr -d '()')
-          echo "### ${{ matrix.site }}: ${CHARS} chars (${STATUS})" >> $GITHUB_STEP_SUMMARY
+          # Build API URL
+          SUFFIX=""
+          if [ "$ENVIRONMENT" = "dev" ]; then SUFFIX="-dev"; fi
+          API_BASE="https://${MODAL_USERNAME}--content-scraper-api-fastapi-app${SUFFIX}.modal.run"
+
+          # URL encode the path
+          ENCODED_PATH=$(printf '%s' "${{ matrix.testPath }}" | jq -sRr @uri)
+
+          echo "Testing content for ${{ matrix.id }} (${{ matrix.testPath }})..."
+          RESPONSE=$(curl -sf "${API_BASE}/sites/${{ matrix.id }}/content?path=${ENCODED_PATH}&max_age=0" \
+            -H "Modal-Key: ${MODAL_KEY}" \
+            -H "Modal-Secret: ${MODAL_SECRET}")
+
+          SUCCESS=$(echo "$RESPONSE" | jq -r '.success')
+          CACHED=$(echo "$RESPONSE" | jq -r '.from_cache')
+          CONTENT_LEN=$(echo "$RESPONSE" | jq -r '.content | length')
+
+          STATUS="fresh"
+          if [ "$CACHED" = "true" ]; then STATUS="cached"; fi
+
+          echo "Success: $SUCCESS, ${CONTENT_LEN} chars (${STATUS})"
+          echo "### ${{ matrix.id }}: ${CONTENT_LEN} chars (${STATUS})" >> $GITHUB_STEP_SUMMARY
