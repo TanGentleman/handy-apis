@@ -2,7 +2,7 @@
 
 Usage:
     python tests/test_modal.py           # Run all tests sequentially
-    python tests/test_modal.py parallel  # Fetch all 9 sites in parallel
+    python tests/test_modal.py parallel  # Fetch all sites in parallel
 """
 
 import asyncio
@@ -23,30 +23,6 @@ DEFAULT_TIMEOUT = 15.0
 CONTENT_TIMEOUT = 180.0
 MAX_CONCURRENCY = 50
 
-ALL_SITES = [
-    "modal",
-    "convex",
-    "terraform-aws",
-    "cursor",
-    "claude-platform",
-    "claude-code",
-    "unsloth",
-    "playwright",
-    "datadog",
-]
-
-SITE_TEST_PATHS = {
-    "modal": "/guide/dicts",
-    "convex": "/functions/http-actions",
-    "terraform-aws": "/resources/acm_certificate",
-    "cursor": "/agent/browser",
-    "claude-platform": "/agent-sdk/mcp",
-    "claude-code": "/headless",
-    "unsloth": "/basics/chat-templates",
-    "playwright": "/evaluating",
-    "datadog": "/tracing/trace_explorer",
-}
-
 
 def get_auth_headers() -> dict:
     """Get Modal auth headers from environment variables."""
@@ -55,6 +31,18 @@ def get_auth_headers() -> dict:
     if key and secret:
         return {"Modal-Key": key, "Modal-Secret": secret}
     return {}
+
+
+def fetch_sites_with_paths() -> list[dict]:
+    """Fetch all sites with their test paths from the API."""
+    resp = httpx.get(
+        f"{API_BASE}/sites",
+        params={"include_test_paths": "true"},
+        headers=get_auth_headers(),
+        timeout=DEFAULT_TIMEOUT,
+    )
+    resp.raise_for_status()
+    return resp.json()["sites"]
 
 
 async def _fetch_with_semaphore(
@@ -86,8 +74,9 @@ async def _fetch_with_semaphore(
 
 async def fetch_all_parallel() -> tuple[dict, bool]:
     """Fetch content from all providers in parallel using semaphore."""
+    sites = fetch_sites_with_paths()
     print(
-        f"\nFetching content from {len(ALL_SITES)} sites (max concurrency: {MAX_CONCURRENCY})..."
+        f"\nFetching content from {len(sites)} sites (max concurrency: {MAX_CONCURRENCY})..."
     )
     print("=" * 60)
 
@@ -97,8 +86,8 @@ async def fetch_all_parallel() -> tuple[dict, bool]:
 
     async with httpx.AsyncClient(timeout=CONTENT_TIMEOUT) as client:
         tasks = [
-            _fetch_with_semaphore(client, semaphore, site_id, SITE_TEST_PATHS[site_id])
-            for site_id in ALL_SITES
+            _fetch_with_semaphore(client, semaphore, site["id"], site["testPath"])
+            for site in sites
         ]
         responses = await asyncio.gather(*tasks)
 
@@ -120,13 +109,14 @@ async def verify_all_cached() -> bool:
     print("\nVerifying cache status...")
     print("=" * 60)
 
+    sites = fetch_sites_with_paths()
     semaphore = asyncio.Semaphore(MAX_CONCURRENCY)
     all_cached = True
 
     async with httpx.AsyncClient(timeout=CONTENT_TIMEOUT) as client:
         tasks = [
-            _fetch_with_semaphore(client, semaphore, site_id, SITE_TEST_PATHS[site_id])
-            for site_id in ALL_SITES
+            _fetch_with_semaphore(client, semaphore, site["id"], site["testPath"])
+            for site in sites
         ]
         results = await asyncio.gather(*tasks)
 
@@ -196,7 +186,7 @@ def run_sequential_tests():
 
 
 async def run_parallel_tests():
-    """Fetch all 9 sites in parallel, then verify caching."""
+    """Fetch all sites in parallel, then verify caching."""
     print(f"Testing API: {API_BASE}")
 
     _, all_ok = await fetch_all_parallel()

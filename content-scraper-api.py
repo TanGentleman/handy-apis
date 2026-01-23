@@ -666,10 +666,21 @@ async def health():
 
 
 @web_app.get("/sites")
-async def get_sites():
-    """List all available site IDs."""
+async def get_sites(
+    include_test_paths: bool = Query(default=False, description="Include testPath for each site (filters to sites with testPath)")
+):
+    """List all available sites, optionally filtered to those with test paths."""
     sites_config = load_sites_config()
-    return {"sites": list(sites_config.keys()), "count": len(sites_config)}
+    if include_test_paths:
+        # Only include sites that have a testPath configured
+        sites = [
+            {"id": site_id, "testPath": config["testPath"]}
+            for site_id, config in sites_config.items()
+            if config.get("testPath")
+        ]
+    else:
+        sites = [{"id": site_id} for site_id, config in sites_config.items()]
+    return {"sites": sites, "count": len(sites)}
 
 
 @web_app.get("/discover")

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """CLI tool to fetch documentation from the content-scraper API."""
 
+import json
 import os
 import re
 import sys
@@ -105,9 +106,9 @@ def cmd_sites():
     """List all available site IDs."""
     resp = httpx.get(f"{API_BASE}/sites", headers=get_auth_headers())
     resp.raise_for_status()
-    sites = resp.json()["sites"]
-    for s in sites:
-        print(s)
+    data = resp.json()
+    for site in data["sites"]:
+        print(site["id"])
 
 
 def cmd_links(site_id: str, save: bool = False, force: bool = False):
@@ -443,7 +444,7 @@ Commands:
 
 Examples:
   docpull sites
-  docpull discover https://developers.whatnot.com/docs/getting-started
+  docpull discover https://cursor.com/docs/get-started/quickstart
   docpull links cursor --save
   docpull content modal /guide
   docpull index modal
