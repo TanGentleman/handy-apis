@@ -27,7 +27,7 @@ playwright_image = (
         "playwright install-deps chromium",
         "playwright install chromium",
     )
-    .pip_install("fastapi[standard]", "pydantic", "httpx")
+    .pip_install("fastapi[standard]", "pydantic", "httpx", "markdownify")
     .add_local_file("scraper/config/sites.json", "/root/sites.json")
 )
 
@@ -72,6 +72,12 @@ class LinksResponse(BaseModel):
 
 
 # --- Helper functions ---
+def html_to_markdown(html: str) -> str:
+    """Convert HTML to markdown using markdownify."""
+    from markdownify import markdownify as md
+    return md(html, heading_style="ATX", strip=["script", "style"]).strip()
+
+
 def clean_url(url: str) -> str:
     """Remove query params and fragments from URL."""
     return url.split("?")[0].split("#")[0].rstrip("/")
@@ -245,7 +251,8 @@ class Scraper:
                 content = page.evaluate("() => navigator.clipboard.readText()")
             else:  # inner_html
                 element = page.query_selector(selector)
-                content = element.inner_html() if element else ""
+                raw_html = element.inner_html() if element else ""
+                content = html_to_markdown(raw_html)
 
             print(f"[scrape_content] OK {len(content):,} chars")
 

@@ -3,7 +3,6 @@
 
 import json
 import os
-import re
 import sys
 from urllib.parse import urlparse
 
@@ -29,77 +28,6 @@ def get_auth_headers() -> dict:
     if key and secret:
         return {"Modal-Key": key, "Modal-Secret": secret}
     return {}
-
-
-def html_to_markdown(html: str) -> str:
-    """Convert HTML to markdown."""
-    md = html
-    # Headers
-    for i in range(1, 7):
-        md = re.sub(
-            rf"<h{i}[^>]*>(.*?)</h{i}>",
-            rf"\n{'#' * i} \1\n\n",
-            md,
-            flags=re.DOTALL | re.IGNORECASE,
-        )
-    # Code blocks
-    md = re.sub(
-        r"<pre[^>]*><code[^>]*>(.*?)</code></pre>",
-        r"\n```\n\1\n```\n\n",
-        md,
-        flags=re.DOTALL,
-    )
-    md = re.sub(r"<pre[^>]*>(.*?)</pre>", r"\n```\n\1\n```\n\n", md, flags=re.DOTALL)
-    md = re.sub(r"<code[^>]*>(.*?)</code>", r"`\1`", md, flags=re.DOTALL)
-    # Bold/italic
-    md = re.sub(
-        r"<(strong|b)[^>]*>(.*?)</\1>", r"**\2**", md, flags=re.DOTALL | re.IGNORECASE
-    )
-    md = re.sub(
-        r"<(em|i)[^>]*>(.*?)</\1>", r"*\2*", md, flags=re.DOTALL | re.IGNORECASE
-    )
-    # Links
-    md = re.sub(
-        r'<a[^>]*href="([^"]*)"[^>]*>(.*?)</a>', r"[\2](\1)", md, flags=re.DOTALL
-    )
-
-    # Lists
-    def convert_list(m, marker_fn):
-        items = re.findall(r"<li[^>]*>(.*?)</li>", m.group(1), flags=re.DOTALL)
-        return (
-            "\n"
-            + "\n".join(marker_fn(i, item.strip()) for i, item in enumerate(items))
-            + "\n\n"
-        )
-
-    md = re.sub(
-        r"<ul[^>]*>(.*?)</ul>",
-        lambda m: convert_list(m, lambda i, t: f"- {t}"),
-        md,
-        flags=re.DOTALL,
-    )
-    md = re.sub(
-        r"<ol[^>]*>(.*?)</ol>",
-        lambda m: convert_list(m, lambda i, t: f"{i + 1}. {t}"),
-        md,
-        flags=re.DOTALL,
-    )
-    # Paragraphs/breaks
-    md = re.sub(r"<p[^>]*>(.*?)</p>", r"\1\n\n", md, flags=re.DOTALL)
-    md = re.sub(r"<br\s*/?>", "\n", md)
-    # Strip remaining tags
-    md = re.sub(r"<[^>]+>", "", md)
-    # Cleanup
-    md = re.sub(r"\n{3,}", "\n\n", md)
-    md = re.sub(r"Copy\n", "", md)
-    md = (
-        md.replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&amp;", "&")
-        .replace("&quot;", '"')
-        .replace("&#39;", "'")
-    )
-    return md.strip()
 
 
 def cmd_sites():
@@ -151,11 +79,7 @@ def cmd_content(site_id: str, path: str, force: bool = False):
     )
     resp.raise_for_status()
     data = resp.json()
-
     content = data["content"]
-    # Convert HTML to markdown if needed
-    if content.lstrip().startswith("<"):
-        content = html_to_markdown(content)
 
     # Sanitize path for filename
     safe_path = path.strip("/").replace("/", "_") or "index"
