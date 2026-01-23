@@ -16,6 +16,24 @@ on:
         options:
           - prod
           - dev
+      site:
+        description: 'Site to test'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - modal
+          - convex
+          - datadog
+          - terraform-aws
+          - cursor
+          - claude-platform
+          - claude-code
+          - unsloth
+          - playwright
+          - whatnot
+          - corridor
 
 jobs:
   get-sites:
@@ -47,8 +65,14 @@ jobs:
 
       - name: Build matrix from sites.json
         id: sites
+        env:
+          SELECTED_SITE: ${{ inputs.site || 'all' }}
         run: |
-          MATRIX=$(jq -c '{include: [.sites | to_entries[] | {id: .key, testPath: .value.testPath}]}' scraper/config/sites.json)
+          if [ "$SELECTED_SITE" = "all" ]; then
+            MATRIX=$(jq -c '{include: [.sites | to_entries[] | {id: .key, testPath: .value.testPath}]}' scraper/config/sites.json)
+          else
+            MATRIX=$(jq -c --arg site "$SELECTED_SITE" '{include: [.sites | to_entries[] | select(.key == $site) | {id: .key, testPath: .value.testPath}]}' scraper/config/sites.json)
+          fi
           echo "matrix=$MATRIX" >> $GITHUB_OUTPUT
 
   test-links:
