@@ -39,7 +39,7 @@ cache = modal.Dict.from_name("scraper-cache", create_if_missing=True)
 # Modal Dict for tracking failed links
 error_tracker = modal.Dict.from_name("scraper-errors", create_if_missing=True)
 
-DEFAULT_MAX_AGE = 3600  # 1 hour
+DEFAULT_MAX_AGE = 3600 * 48  # 48 hours
 ERROR_THRESHOLD = 3  # Skip links that have failed this many times
 ERROR_EXPIRY = 86400  # 24 hours - errors auto-expire
 
@@ -686,7 +686,7 @@ async def root():
         },
         "features": [
             "Links caching (when >1 link)",
-            "Content caching (1 hour default)",
+            "Content caching (48 hour default)",
             "Error tracking (skip after 3 failures, auto-expire 24h, force clears)",
             "Parallel bulk indexing (50 concurrent)",
         ],
