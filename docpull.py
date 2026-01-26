@@ -124,6 +124,32 @@ def cmd_index(site_id: str, max_concurrent: int = 50):
             print(f"  {err['path']}: {err['error']}", file=sys.stderr)
 
 
+def cmd_download(site_id: str, output_dir: str = "."):
+    """Download all documentation for a site as a ZIP file."""
+    print(f"Downloading {site_id} docs...", file=sys.stderr)
+
+    resp = httpx.get(
+        f"{API_BASE}/sites/{site_id}/download",
+        headers=get_auth_headers(),
+        timeout=600.0,  # 10 minute timeout for large sites
+    )
+    resp.raise_for_status()
+
+    # Save ZIP file
+    out_path = os.path.join(output_dir, f"{site_id}_docs.zip")
+    with open(out_path, "wb") as f:
+        f.write(resp.content)
+
+    # Display stats from response headers
+    total = resp.headers.get("X-Download-Total", "?")
+    cached = resp.headers.get("X-Download-Cached", "?")
+    scraped = resp.headers.get("X-Download-Scraped", "?")
+    failed = resp.headers.get("X-Download-Failed", "?")
+
+    print(f"Saved to {out_path} ({len(resp.content):,} bytes)", file=sys.stderr)
+    print(f"Pages: {total} total | {cached} cached | {scraped} scraped | {failed} failed", file=sys.stderr)
+
+
 def cmd_discover(url: str):
     """Analyze a documentation page and suggest configuration.
 
@@ -363,6 +389,7 @@ Commands:
   content <site_id> <path>         Get content (uses cache if <1hr old)
   content <site_id> <path> --force Force fresh scrape (also clears error tracking)
   index <site_id>                  Fetch and cache all pages from a site
+  download <site_id>               Download all docs as ZIP file
   cache stats                      Show cache statistics
   cache clear <site_id>            Clear cache for a site
 
@@ -372,6 +399,7 @@ Examples:
   docpull links cursor --save
   docpull content modal /guide
   docpull index modal
+  docpull download modal
   docpull cache stats
 """)
 
@@ -396,6 +424,8 @@ def main():
         cmd_content(sys.argv[2], sys.argv[3], force=force)
     elif cmd == "index" and len(sys.argv) >= 3:
         cmd_index(sys.argv[2])
+    elif cmd == "download" and len(sys.argv) >= 3:
+        cmd_download(sys.argv[2])
     elif cmd == "cache" and len(sys.argv) >= 2:
         if len(sys.argv) == 2 or sys.argv[2] == "stats":
             cmd_cache("stats")
