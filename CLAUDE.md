@@ -14,6 +14,9 @@ python docpull.py discover <url>       # Auto-discover selectors for new site
 python docpull.py links <site>         # Get links (--force bypasses cache)
 python docpull.py content <site> <path> # Fetch page (--force clears errors)
 python docpull.py index <site>         # Bulk fetch all pages
+python docpull.py download <site>      # Download site as ZIP
+python docpull.py export urls.txt      # Export URLs to ZIP (auto-resolves sites)
+python docpull.py export urls.txt --unzip --scrape  # Export, scrape missing, extract
 python docpull.py cache stats          # Cache stats
 python docpull.py cache clear <site>   # Clear cache
 ```

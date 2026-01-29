@@ -11,7 +11,7 @@ import re
 import time
 import zipfile
 from pathlib import Path
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin, urlparse, urlunparse
 
 import modal
 from fastapi import FastAPI, HTTPException, Query
@@ -74,6 +74,13 @@ class LinksResponse(BaseModel):
     count: int
 
 
+class ExportRequest(BaseModel):
+    urls: list[str]
+    cached_only: bool = True
+    max_age: int = DEFAULT_MAX_AGE
+    include_manifest: bool = True
+
+
 # --- Helper functions ---
 def html_to_markdown(html: str) -> str:
     """Convert HTML to markdown using markdownify."""
@@ -84,6 +91,124 @@ def html_to_markdown(html: str) -> str:
 def clean_url(url: str) -> str:
     """Remove query params and fragments from URL."""
     return url.split("?")[0].split("#")[0].rstrip("/")
+
+
+def normalize_url(url: str) -> str:
+    """Normalize URL for consistent matching.
+
+    - Lowercase scheme and host
+    - Remove query/fragment
+    - Collapse duplicate slashes in path
+    - Remove trailing slash (except for root "/")
+    """
+    url = url.strip()
+    p = urlparse(url)
+
+    scheme = (p.scheme or "https").lower()
+    netloc = (p.netloc or "").lower()
+
+    # Normalize path
+    path = p.path or "/"
+    path = re.sub(r"/{2,}", "/", path)  # collapse //
+    if path != "/" and path.endswith("/"):
+        path = path[:-1]
+
+    return urlunparse((scheme, netloc, path, "", "", ""))
+
+
+def normalize_path(path: str) -> str:
+    """Normalize a URL path for cache keys.
+
+    - Empty string for base page
+    - Always starts with / otherwise
+    - No trailing slash
+    - No duplicate slashes
+    """
+    if not path:
+        return ""
+    path = re.sub(r"/{2,}", "/", path)
+    if not path.startswith("/"):
+        path = "/" + path
+    if path != "/" and path.endswith("/"):
+        path = path[:-1]
+    return "" if path == "/" else path
+
+
+# Site resolver with precomputed normalized baseUrls
+_site_resolver_cache: dict | None = None
+
+
+def get_site_resolver() -> dict:
+    """Build site resolver mapping normalized baseUrls to site_ids.
+
+    Returns dict with:
+    - 'sites': list of (normalized_base, site_id) sorted by length desc (for longest-prefix match)
+    - 'config': full sites config
+    """
+    global _site_resolver_cache
+    if _site_resolver_cache is not None:
+        return _site_resolver_cache
+
+    sites_config = load_sites_config()
+    sites = []
+
+    for site_id, config in sites_config.items():
+        base_url = config.get("baseUrl", "")
+        if base_url:
+            norm_base = normalize_url(base_url)
+            sites.append((norm_base, site_id))
+
+    # Sort by length descending for longest-prefix match
+    sites.sort(key=lambda x: len(x[0]), reverse=True)
+
+    _site_resolver_cache = {
+        "sites": sites,
+        "config": sites_config,
+    }
+    return _site_resolver_cache
+
+
+def resolve_url_to_site(url: str) -> tuple[str | None, str, str]:
+    """Resolve a URL to (site_id, path, normalized_url).
+
+    Uses longest-prefix matching on normalized baseUrls.
+    Returns (None, "", normalized_url) if no match found.
+    """
+    norm_url = normalize_url(url)
+    resolver = get_site_resolver()
+
+    for norm_base, site_id in resolver["sites"]:
+        if norm_url == norm_base:
+            return (site_id, "", norm_url)
+        if norm_url.startswith(norm_base + "/"):
+            path = norm_url[len(norm_base):]
+            return (site_id, path, norm_url)
+
+    return (None, "", norm_url)
+
+
+def zip_path_for(site_id: str, path: str) -> str:
+    """Generate safe ZIP path: docs/{site_id}/{path}.md
+
+    Handles edge cases:
+    - Base page (path="") -> docs/{site}/index.md
+    - Prevents zip-slip attacks
+    """
+    import posixpath
+
+    path = normalize_path(path)
+    if path == "":
+        return f"docs/{site_id}/index.md"
+
+    # Remove leading slash and normalize
+    clean = path.lstrip("/")
+    clean = posixpath.normpath(clean)
+
+    # Security: prevent zip-slip
+    if clean.startswith("..") or "/.." in clean:
+        raise ValueError(f"Unsafe path: {path}")
+
+    return f"docs/{site_id}/{clean}.md"
 
 
 def extract_links_from_html(html: str, base_url: str, pattern: str) -> list[str]:
@@ -674,16 +799,16 @@ async def root():
     """API root with endpoint documentation."""
     return {
         "name": "Content Scraper API",
-        "version": "6.2",
+        "version": "7.0",
         "storage": "Modal Dict (7-day TTL)",
         "endpoints": {
             "/sites": "GET - List available site IDs",
             "/discover": "GET - Analyze a page and suggest selectors (url param)",
             "/sites/{site_id}/links": "GET - Get all doc links for a site (cached)",
             "/sites/{site_id}/content": "GET - Get content from a page (cached, max_age=0 to force)",
-            "/sites/{site_id}/markdown": "POST - Get faculty as markdown (for ucsf-bms)",
             "/sites/{site_id}/index": "POST - Fetch all pages in parallel",
             "/sites/{site_id}/download": "GET - Download all docs as ZIP file",
+            "/export/zip": "POST - Export list of URLs as ZIP (auto-resolves sites)",
             "/cache/stats": "GET - Get cache statistics",
             "/cache/{site_id}": "DELETE - Clear cache for a site",
             "/errors": "GET/DELETE - List or clear all error tracking",
@@ -694,8 +819,8 @@ async def root():
             "Content caching (48 hour default)",
             "Error tracking (skip after 3 failures, auto-expire 24h, force clears)",
             "Parallel bulk indexing (50 concurrent)",
-            "ZIP download with folder structure (like docpull.py --save)",
-            "Faculty markdown export (for ucsf-bms site)",
+            "ZIP download with folder structure",
+            "URL-based export with auto site resolution (longest-prefix match)",
         ],
     }
 
@@ -1215,6 +1340,223 @@ Generated: {time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime())}
             "X-Download-Cached": str(cached_count),
             "X-Download-Scraped": str(scraped_count),
             "X-Download-Failed": str(failed_count),
+        }
+    )
+
+
+@web_app.post("/export/zip")
+async def export_urls_as_zip(request: ExportRequest):
+    """Export a list of URLs as a ZIP file with docs/{site}/{path}.md structure.
+
+    Takes arbitrary URLs, resolves them to configured sites using longest-prefix
+    matching on baseUrls, fetches content (from cache or fresh), and returns
+    a ZIP file organized by site.
+
+    Request body:
+    - urls: List of documentation URLs to export
+    - cached_only: If true (default), only return cached content (no scraping)
+    - max_age: Max cache age in seconds (default 48h)
+    - include_manifest: If true (default), include manifest.json with metadata
+    """
+    urls = request.urls
+    cached_only = request.cached_only
+    max_age = request.max_age
+    include_manifest = request.include_manifest
+
+    if not urls:
+        raise HTTPException(status_code=400, detail="No URLs provided")
+
+    print(f"[export_zip] Processing {len(urls)} URLs (cached_only={cached_only})")
+
+    # Resolve all URLs to (site_id, path)
+    resolved: list[dict] = []
+    for url in urls:
+        site_id, path, norm_url = resolve_url_to_site(url)
+        resolved.append({
+            "original_url": url,
+            "normalized_url": norm_url,
+            "site_id": site_id,
+            "path": path,
+        })
+
+    # Group by site for efficient fetching
+    by_site: dict[str, list[dict]] = {}
+    unknown_urls: list[dict] = []
+
+    for r in resolved:
+        if r["site_id"]:
+            by_site.setdefault(r["site_id"], []).append(r)
+        else:
+            unknown_urls.append(r)
+
+    print(f"[export_zip] Resolved to {len(by_site)} sites, {len(unknown_urls)} unknown")
+
+    # Fetch content for each resolved URL
+    scraper = Scraper()
+    semaphore = asyncio.Semaphore(50)
+    now = time.time()
+
+    async def fetch_content(r: dict) -> dict:
+        """Fetch content for a resolved URL."""
+        site_id = r["site_id"]
+        path = r["path"]
+        cache_key = f"{site_id}:{path}"
+
+        result = {
+            **r,
+            "success": False,
+            "from_cache": False,
+            "content": None,
+            "content_length": 0,
+            "error": None,
+        }
+
+        # Try cache first
+        try:
+            cached = cache[cache_key]
+            if cached and (now - cached["timestamp"]) < max_age:
+                result["success"] = True
+                result["from_cache"] = True
+                result["content"] = cached["content"]
+                result["content_length"] = len(cached["content"])
+                return result
+        except KeyError:
+            pass
+
+        # If cached_only, mark as miss
+        if cached_only:
+            result["error"] = "Not in cache"
+            return result
+
+        # Scrape fresh content
+        async with semaphore:
+            scrape_result = await scraper.scrape_content.remote.aio(site_id, path)
+
+        if scrape_result.get("success"):
+            content = scrape_result["content"]
+            result["success"] = True
+            result["from_cache"] = False
+            result["content"] = content
+            result["content_length"] = len(content) if content else 0
+
+            # Cache the result
+            if content:
+                cache[cache_key] = {
+                    "content": content,
+                    "url": scrape_result["url"],
+                    "timestamp": time.time(),
+                }
+        else:
+            result["error"] = scrape_result.get("error", "Unknown error")
+
+        return result
+
+    # Fetch all content in parallel
+    tasks = [fetch_content(r) for r in resolved if r["site_id"]]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    # Process results
+    manifest_entries: list[dict] = []
+    ok_count = 0
+    miss_count = 0
+    error_count = 0
+    cached_count = 0
+    scraped_count = 0
+
+    # Create ZIP in memory
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        for result in results:
+            if isinstance(result, Exception):
+                error_count += 1
+                continue
+
+            entry = {
+                "url": result["original_url"],
+                "normalized_url": result["normalized_url"],
+                "site_id": result["site_id"],
+                "path": result["path"],
+                "success": result["success"],
+                "from_cache": result.get("from_cache", False),
+                "content_length": result.get("content_length", 0),
+                "error": result.get("error"),
+                "zip_path": None,
+            }
+
+            if result["success"] and result["content"]:
+                content = result["content"]
+
+                # Convert HTML to markdown if needed
+                if content.lstrip().startswith("<"):
+                    content = html_to_markdown(content)
+
+                # Generate safe ZIP path
+                try:
+                    zpath = zip_path_for(result["site_id"], result["path"])
+                    zf.writestr(zpath, content)
+                    entry["zip_path"] = zpath
+                    ok_count += 1
+
+                    if result.get("from_cache"):
+                        cached_count += 1
+                    else:
+                        scraped_count += 1
+                except ValueError as e:
+                    entry["error"] = str(e)
+                    error_count += 1
+            else:
+                if result.get("error") == "Not in cache":
+                    miss_count += 1
+                else:
+                    error_count += 1
+
+            manifest_entries.append(entry)
+
+        # Add unknown URLs to manifest
+        for r in unknown_urls:
+            manifest_entries.append({
+                "url": r["original_url"],
+                "normalized_url": r["normalized_url"],
+                "site_id": None,
+                "path": None,
+                "success": False,
+                "from_cache": False,
+                "content_length": 0,
+                "error": "No matching site configuration",
+                "zip_path": None,
+            })
+            error_count += 1
+
+        # Add manifest.json if requested
+        if include_manifest:
+            manifest = {
+                "generated_at": time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
+                "total_urls": len(urls),
+                "ok": ok_count,
+                "cached": cached_count,
+                "scraped": scraped_count,
+                "miss": miss_count,
+                "error": error_count + len(unknown_urls),
+                "unknown_sites": len(unknown_urls),
+                "entries": manifest_entries,
+            }
+            zf.writestr("manifest.json", json.dumps(manifest, indent=2))
+
+    print(f"[export_zip] ZIP created - ok={ok_count} (cached={cached_count}, scraped={scraped_count}), miss={miss_count}, error={error_count}")
+
+    # Return ZIP
+    zip_buffer.seek(0)
+    return StreamingResponse(
+        io.BytesIO(zip_buffer.read()),
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": "attachment; filename=docs_export.zip",
+            "X-Export-Total": str(len(urls)),
+            "X-Export-Ok": str(ok_count),
+            "X-Export-Cached": str(cached_count),
+            "X-Export-Scraped": str(scraped_count),
+            "X-Export-Miss": str(miss_count),
+            "X-Export-Error": str(error_count + len(unknown_urls)),
         }
     )
 

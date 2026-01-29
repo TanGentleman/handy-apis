@@ -150,6 +150,70 @@ def cmd_download(site_id: str, output_dir: str = "."):
     print(f"Pages: {total} total | {cached} cached | {scraped} scraped | {failed} failed", file=sys.stderr)
 
 
+def cmd_export(urls_file: str, output: str = "docs_export.zip", unzip: bool = False, scrape: bool = False):
+    """Export a list of URLs as a ZIP file.
+
+    URLs are auto-resolved to configured sites using longest-prefix matching.
+    By default only returns cached content (use --scrape to fetch fresh).
+
+    Args:
+        urls_file: Path to file with URLs (one per line), or "-" for stdin
+        output: Output ZIP file path (default: docs_export.zip)
+        unzip: If True, auto-extract after download
+        scrape: If True, scrape missing content (default: cached only)
+    """
+    # Read URLs from file or stdin
+    if urls_file == "-":
+        urls = [line.strip() for line in sys.stdin if line.strip() and not line.startswith("#")]
+    else:
+        with open(urls_file) as f:
+            urls = [line.strip() for line in f if line.strip() and not line.startswith("#")]
+
+    if not urls:
+        print("Error: No URLs provided", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"Exporting {len(urls)} URLs (cached_only={not scrape})...", file=sys.stderr)
+
+    # Build request
+    payload = {
+        "urls": urls,
+        "cached_only": not scrape,
+        "include_manifest": True,
+    }
+
+    resp = httpx.post(
+        f"{API_BASE}/export/zip",
+        json=payload,
+        headers=get_auth_headers(),
+        timeout=600.0,
+    )
+    resp.raise_for_status()
+
+    # Save ZIP file
+    with open(output, "wb") as f:
+        f.write(resp.content)
+
+    # Display stats from response headers
+    total = resp.headers.get("X-Export-Total", "?")
+    ok = resp.headers.get("X-Export-Ok", "?")
+    cached = resp.headers.get("X-Export-Cached", "?")
+    scraped = resp.headers.get("X-Export-Scraped", "?")
+    miss = resp.headers.get("X-Export-Miss", "?")
+    error = resp.headers.get("X-Export-Error", "?")
+
+    print(f"Saved to {output} ({len(resp.content):,} bytes)", file=sys.stderr)
+    print(f"URLs: {total} total | {ok} ok (cached: {cached}, scraped: {scraped}) | {miss} miss | {error} error", file=sys.stderr)
+
+    # Auto-unzip if requested
+    if unzip:
+        import zipfile
+        print(f"Extracting to current directory...", file=sys.stderr)
+        with zipfile.ZipFile(output, "r") as zf:
+            zf.extractall(".")
+        print(f"Extracted to ./docs/", file=sys.stderr)
+
+
 def cmd_discover(url: str):
     """Analyze a documentation page and suggest configuration.
 
@@ -390,6 +454,10 @@ Commands:
   content <site_id> <path> --force Force fresh scrape (also clears error tracking)
   index <site_id>                  Fetch and cache all pages from a site
   download <site_id>               Download all docs as ZIP file
+  export <urls.txt>                Export URLs to ZIP (auto-resolves sites)
+  export <urls.txt> --unzip        Export and auto-extract to ./docs/
+  export <urls.txt> --scrape       Scrape missing content (default: cached only)
+  export -                         Read URLs from stdin
   cache stats                      Show cache statistics
   cache clear <site_id>            Clear cache for a site
 
@@ -400,6 +468,8 @@ Examples:
   docpull content modal /guide
   docpull index modal
   docpull download modal
+  docpull export urls.txt --unzip
+  echo "https://modal.com/docs/guide" | docpull export -
   docpull cache stats
 """)
 
@@ -426,6 +496,20 @@ def main():
         cmd_index(sys.argv[2])
     elif cmd == "download" and len(sys.argv) >= 3:
         cmd_download(sys.argv[2])
+    elif cmd == "export" and len(sys.argv) >= 3:
+        unzip = "--unzip" in sys.argv
+        scrape = "--scrape" in sys.argv
+        # Find the urls file (first non-flag argument after "export")
+        urls_file = None
+        for arg in sys.argv[2:]:
+            if not arg.startswith("--"):
+                urls_file = arg
+                break
+        if urls_file:
+            cmd_export(urls_file, unzip=unzip, scrape=scrape)
+        else:
+            print_usage()
+            sys.exit(1)
     elif cmd == "cache" and len(sys.argv) >= 2:
         if len(sys.argv) == 2 or sys.argv[2] == "stats":
             cmd_cache("stats")
