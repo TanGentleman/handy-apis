@@ -180,6 +180,23 @@
         "method": "inner_html",
         "waitUntil": "domcontentloaded"
       }
+    },
+    "windsurf": {
+      "name": "Windsurf",
+      "baseUrl": "https://docs.windsurf.com",
+      "testPath": "/windsurf/cascade/hooks",
+      "mode": "fetch",
+      "links": {
+        "startUrls": ["/windsurf/getting-started"],
+        "pattern": "docs.windsurf.com",
+        "maxDepth": 2
+      },
+      "content": {
+        "mode": "browser",
+        "waitFor": "#content",
+        "selector": "#content",
+        "method": "inner_html"
+      }
     }
   }
 }
