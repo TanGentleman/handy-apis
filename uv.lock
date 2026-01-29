@@ -218,6 +218,7 @@ dependencies = [
     { name = "httpx" },
     { name = "modal" },
     { name = "python-dotenv" },
+    { name = "typer" },
 ]
 
 [package.metadata]
@@ -226,6 +227,7 @@ requires-dist = [
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "modal", specifier = ">=1.2.5" },
     { name = "python-dotenv", specifier = ">=1.2.1" },
+    { name = "typer", specifier = ">=0.15.0" },
 ]
 
 [[package]]

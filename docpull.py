@@ -4,9 +4,11 @@
 import json
 import os
 import sys
+from typing import Annotated, Optional
 from urllib.parse import urlparse
 
 import httpx
+import typer
 
 try:
     from dotenv import load_dotenv
@@ -21,6 +23,14 @@ _SUFFIX = "-dev" if _ENV == "dev" else ""
 
 API_BASE = f"https://{_USERNAME}--content-scraper-api-fastapi-app{_SUFFIX}.modal.run"
 
+# Main app and subcommands
+app = typer.Typer(
+    help="CLI tool to fetch and cache documentation as markdown.",
+    no_args_is_help=True,
+)
+cache_app = typer.Typer(help="Cache management commands.")
+app.add_typer(cache_app, name="cache")
+
 
 def get_auth_headers() -> dict:
     key = os.environ.get("MODAL_KEY")
@@ -30,7 +40,8 @@ def get_auth_headers() -> dict:
     return {}
 
 
-def cmd_sites():
+@app.command()
+def sites():
     """List all available site IDs."""
     resp = httpx.get(f"{API_BASE}/sites", headers=get_auth_headers(), timeout=30.0)
     resp.raise_for_status()
@@ -39,206 +50,27 @@ def cmd_sites():
         print(site["id"])
 
 
-def cmd_links(site_id: str, save: bool = False, force: bool = False):
-    """Get all documentation links for a site."""
-    params = {"max_age": 0} if force else {}
-    resp = httpx.get(
-        f"{API_BASE}/sites/{site_id}/links",
-        params=params,
-        headers=get_auth_headers(),
-        timeout=120.0,
-    )
-    resp.raise_for_status()
-    data = resp.json()
-    for link in data["links"]:
-        print(link)
-    print(f"\nTotal: {data['count']} links", file=sys.stderr)
-
-    if save:
-        out_dir = "./data"
-        os.makedirs(out_dir, exist_ok=True)
-        out_path = f"{out_dir}/{site_id}_links.json"
-        import json
-
-        with open(out_path, "w") as f:
-            json.dump({f"{site_id}_links": data["links"]}, f, indent=2)
-        print(f"Saved to {out_path}", file=sys.stderr)
-
-
-def cmd_content(site_id: str, path: str, force: bool = False):
-    """Get content from a specific page path."""
-    params = {"path": path}
-    if force:
-        params["max_age"] = 0  # Force fresh scrape
-
-    resp = httpx.get(
-        f"{API_BASE}/sites/{site_id}/content",
-        params=params,
-        headers=get_auth_headers(),
-        timeout=120.0,
-    )
-    resp.raise_for_status()
-    data = resp.json()
-    content = data["content"]
-
-    # Sanitize path for filename
-    safe_path = path.strip("/").replace("/", "_") or "index"
-    out_dir = f"./docs/{site_id}"
-    os.makedirs(out_dir, exist_ok=True)
-    out_path = f"{out_dir}/{safe_path}.md"
-
-    with open(out_path, "w") as f:
-        f.write(content)
-
-    cache_status = "(cached)" if data.get("from_cache") else "(fresh)"
-    print(f"Saved to {out_path} ({len(content)} chars) {cache_status}")
-
-
-def cmd_index(site_id: str, max_concurrent: int = 50):
-    """Fetch and save all pages from a site using parallel bulk API."""
-    print(f"Indexing {site_id}...", file=sys.stderr)
-
-    # Use the parallel bulk indexing API endpoint
-    resp = httpx.post(
-        f"{API_BASE}/sites/{site_id}/index",
-        params={"max_concurrent": max_concurrent},
-        headers=get_auth_headers(),
-        timeout=120.0,
-    )
-    resp.raise_for_status()
-    data = resp.json()
-
-    cached = data.get("cached", 0)
-    scraped = data.get("scraped", 0)
-    print(
-        f"\nTotal: {data['total']} pages | Cached: {cached} | Scraped: {scraped}",
-        file=sys.stderr,
-    )
-    print(
-        f"Success: {data['successful']} | Failed: {data['failed']}",
-        file=sys.stderr,
-    )
-    if data.get("errors"):
-        print("\nFirst 10 errors:", file=sys.stderr)
-        for err in data["errors"]:
-            print(f"  {err['path']}: {err['error']}", file=sys.stderr)
-
-
-def cmd_download(site_id: str, output_dir: str = "."):
-    """Download all documentation for a site as a ZIP file."""
-    print(f"Downloading {site_id} docs...", file=sys.stderr)
-
-    resp = httpx.get(
-        f"{API_BASE}/sites/{site_id}/download",
-        headers=get_auth_headers(),
-        timeout=120.0,
-    )
-    resp.raise_for_status()
-
-    # Save ZIP file
-    out_path = os.path.join(output_dir, f"{site_id}_docs.zip")
-    with open(out_path, "wb") as f:
-        f.write(resp.content)
-
-    # Display stats from response headers
-    total = resp.headers.get("X-Download-Total", "?")
-    cached = resp.headers.get("X-Download-Cached", "?")
-    scraped = resp.headers.get("X-Download-Scraped", "?")
-    failed = resp.headers.get("X-Download-Failed", "?")
-
-    print(f"Saved to {out_path} ({len(resp.content):,} bytes)", file=sys.stderr)
-    print(f"Pages: {total} total | {cached} cached | {scraped} scraped | {failed} failed", file=sys.stderr)
-
-
-def cmd_export(urls_file: str, output: str = "docs_export.zip", unzip: bool = False, scrape: bool = False):
-    """Export a list of URLs as a ZIP file.
-
-    URLs are auto-resolved to configured sites using longest-prefix matching.
-    By default only returns cached content (use --scrape to fetch fresh).
-
-    Args:
-        urls_file: Path to file with URLs (one per line), or "-" for stdin
-        output: Output ZIP file path (default: docs_export.zip)
-        unzip: If True, auto-extract after download
-        scrape: If True, scrape missing content (default: cached only)
-    """
-    # Read URLs from file or stdin
-    if urls_file == "-":
-        urls = [line.strip() for line in sys.stdin if line.strip() and not line.startswith("#")]
-    else:
-        with open(urls_file) as f:
-            urls = [line.strip() for line in f if line.strip() and not line.startswith("#")]
-
-    if not urls:
-        print("Error: No URLs provided", file=sys.stderr)
-        sys.exit(1)
-
-    print(f"Exporting {len(urls)} URLs (cached_only={not scrape})...", file=sys.stderr)
-
-    # Build request
-    payload = {
-        "urls": urls,
-        "cached_only": not scrape,
-        "include_manifest": True,
-    }
-
-    resp = httpx.post(
-        f"{API_BASE}/export/zip",
-        json=payload,
-        headers=get_auth_headers(),
-        timeout=600.0,  # 10 min for large exports
-        follow_redirects=True,
-    )
-    resp.raise_for_status()
-
-    # Save ZIP file
-    with open(output, "wb") as f:
-        f.write(resp.content)
-
-    # Display stats from response headers
-    total = resp.headers.get("X-Export-Total", "?")
-    ok = resp.headers.get("X-Export-Ok", "?")
-    cached = resp.headers.get("X-Export-Cached", "?")
-    scraped = resp.headers.get("X-Export-Scraped", "?")
-    miss = resp.headers.get("X-Export-Miss", "?")
-    error = resp.headers.get("X-Export-Error", "?")
-
-    print(f"Saved to {output} ({len(resp.content):,} bytes)", file=sys.stderr)
-    print(f"URLs: {total} total | {ok} ok (cached: {cached}, scraped: {scraped}) | {miss} miss | {error} error", file=sys.stderr)
-
-    # Auto-unzip if requested
-    if unzip:
-        import zipfile
-        print(f"Extracting to current directory...", file=sys.stderr)
-        with zipfile.ZipFile(output, "r") as zf:
-            zf.extractall(".")
-        print(f"Extracted to ./docs/", file=sys.stderr)
-
-
-def cmd_discover(url: str):
+@app.command()
+def discover(
+    url: Annotated[str, typer.Argument(help="Full URL of a documentation page to analyze")],
+):
     """Analyze a documentation page and suggest configuration.
 
-    Args:
-        url: Full URL of a documentation page to analyze
-
-    Prints comprehensive discovery results including:
-    - Framework detection
-    - Working copy buttons
-    - Ranked content selectors
-    - Link patterns
-    - Ready-to-use configuration snippet
+    Prints comprehensive discovery results including framework detection,
+    working copy buttons, ranked content selectors, link patterns,
+    and a ready-to-use configuration snippet.
     """
     # Validate URL format
     parsed = urlparse(url)
     if not parsed.scheme or not parsed.netloc:
         print(f"Error: Invalid URL format: {url}", file=sys.stderr)
         print("URL must include protocol (e.g., https://example.com)", file=sys.stderr)
-        sys.exit(1)
+        raise typer.Exit(1)
 
-    if parsed.scheme not in ('http', 'https'):
+    if parsed.scheme not in ("http", "https"):
         print(f"Error: Unsupported protocol: {parsed.scheme}", file=sys.stderr)
         print("Only http:// and https:// URLs are supported", file=sys.stderr)
-        sys.exit(1)
+        raise typer.Exit(1)
 
     print(f"Analyzing {url}...\n", file=sys.stderr)
 
@@ -258,14 +90,14 @@ def cmd_discover(url: str):
             print(f"Details: {error_detail}", file=sys.stderr)
         except Exception:
             print(f"Details: {e}", file=sys.stderr)
-        sys.exit(1)
+        raise typer.Exit(1)
     except httpx.TimeoutException:
         print("Error: Request timed out (60s)", file=sys.stderr)
         print("The page may be slow to load or unresponsive", file=sys.stderr)
-        sys.exit(1)
+        raise typer.Exit(1)
     except httpx.HTTPError as e:
         print(f"Error: Failed to connect to API: {e}", file=sys.stderr)
-        sys.exit(1)
+        raise typer.Exit(1)
 
     # Parse URL for fallback suggestions
     parsed = urlparse(url)
@@ -275,7 +107,7 @@ def cmd_discover(url: str):
     print("=" * 70)
 
     # Framework detection
-    framework = data.get('framework', 'unknown')
+    framework = data.get("framework", "unknown")
     print(f"\nFramework Detected: {framework.upper()}")
     print(f"Suggested Base URL: {data['base_url_suggestion']}")
 
@@ -296,7 +128,7 @@ def cmd_discover(url: str):
         if failed_buttons:
             print(f"  Found {len(failed_buttons)} non-working button(s):")
             for btn in failed_buttons:
-                error = btn.get('error', 'unknown')[:60]
+                error = btn.get("error", "unknown")[:60]
                 print(f"    - {btn['selector']} (Error: {error})")
     else:
         print("  No copy buttons detected")
@@ -317,16 +149,16 @@ def cmd_discover(url: str):
 
     # Link analysis section
     link_data = data.get("link_analysis", {})
-    total_links = link_data.get('total_internal_links', 0)
+    total_links = link_data.get("total_internal_links", 0)
 
     print("-" * 70)
-    print(f"LINK ANALYSIS:")
+    print("LINK ANALYSIS:")
     print("-" * 70)
     print(f"\n  Total internal links: {total_links}")
 
     patterns = link_data.get("path_patterns", [])
     if patterns:
-        print(f"\n  Path patterns (by frequency):")
+        print("\n  Path patterns (by frequency):")
         for pattern, count in patterns[:5]:
             pct = (count / total_links * 100) if total_links > 0 else 0
             print(f"    {pattern:20} {count:4} links ({pct:.1f}%)")
@@ -373,7 +205,7 @@ def cmd_discover(url: str):
 
     # Determine link crawling config
     if patterns:
-        best_pattern = patterns[0][0].rstrip('/')
+        best_pattern = patterns[0][0].rstrip("/")
         link_config = f'''  "links": {{
     "startUrls": [""],
     "pattern": "{best_pattern}",
@@ -381,7 +213,11 @@ def cmd_discover(url: str):
   }}'''
         link_note = f"  # Pattern covers {patterns[0][1]} links"
     else:
-        fallback_pattern = f"/{parsed.path.split('/')[1]}" if parsed.path and len(parsed.path.split('/')) > 1 else ""
+        fallback_pattern = (
+            f"/{parsed.path.split('/')[1]}"
+            if parsed.path and len(parsed.path.split("/")) > 1
+            else ""
+        )
         link_config = f'''  "links": {{
     "startUrls": [""],
     "pattern": "{fallback_pattern}",
@@ -390,7 +226,8 @@ def cmd_discover(url: str):
         link_note = "  # WARNING: No clear pattern found - verify this setting"
 
     # Print final config
-    print(f'''
+    print(
+        f'''
 "your-site-id": {{
   "name": "Your Site Name",
   "baseUrl": "{data['base_url_suggestion']}",
@@ -400,12 +237,14 @@ def cmd_discover(url: str):
 {content_config}
 {method_note}
 }}
-''')
+'''
+    )
 
     print("=" * 70)
     print("NEXT STEPS:")
     print("=" * 70)
-    print("""
+    print(
+        """
 1. Review the suggested configuration above
 2. Add it to scraper/config/sites.json (replace 'your-site-id')
 3. Test link discovery:
@@ -416,132 +255,255 @@ def cmd_discover(url: str):
 
 5. If tests pass, index the entire site:
    python docpull.py index your-site-id
-""")
+"""
+    )
     print("=" * 70)
 
 
-def cmd_cache(action: str = "stats", site_id: str = None):
-    """Manage cache: stats, keys, clear <site_id>."""
-    if action == "stats":
-        resp = httpx.get(f"{API_BASE}/cache/stats", headers=get_auth_headers(), timeout=30.0)
-        resp.raise_for_status()
-        data = resp.json()
-        print(f"Total cache entries: {data['total_entries']}")
-        print("\nBy type:")
-        for type_name, count in data["by_type"].items():
-            print(f"  {type_name}: {count}")
-        print("\nBy site:")
-        for site, count in data["by_site"].items():
-            print(f"  {site}: {count}")
-    elif action == "keys":
-        params = {"content_only": "true"}
-        if site_id:
-            params["site_id"] = site_id
-        resp = httpx.get(f"{API_BASE}/cache/keys", params=params, headers=get_auth_headers(), timeout=60.0)
-        resp.raise_for_status()
-        data = resp.json()
-        for entry in data["keys"]:
-            print(entry["url"])
-        print(f"\nTotal: {data['count']} cached pages", file=sys.stderr)
-    elif action == "clear" and site_id:
-        resp = httpx.delete(f"{API_BASE}/cache/{site_id}", headers=get_auth_headers(), timeout=30.0)
-        resp.raise_for_status()
-        print(f"Cleared {resp.json()['deleted']} cache entries for {site_id}")
+@app.command()
+def links(
+    site_id: Annotated[str, typer.Argument(help="Site ID to get links for")],
+    save: Annotated[bool, typer.Option("--save", help="Save links to ./data/<site_id>_links.json")] = False,
+    force: Annotated[bool, typer.Option("--force", help="Force fresh crawl (bypass cache)")] = False,
+):
+    """Get all documentation links for a site."""
+    params = {"max_age": 0} if force else {}
+    resp = httpx.get(
+        f"{API_BASE}/sites/{site_id}/links",
+        params=params,
+        headers=get_auth_headers(),
+        timeout=120.0,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    for link in data["links"]:
+        print(link)
+    print(f"\nTotal: {data['count']} links", file=sys.stderr)
+
+    if save:
+        out_dir = "./data"
+        os.makedirs(out_dir, exist_ok=True)
+        out_path = f"{out_dir}/{site_id}_links.json"
+        with open(out_path, "w") as f:
+            json.dump({f"{site_id}_links": data["links"]}, f, indent=2)
+        print(f"Saved to {out_path}", file=sys.stderr)
+
+
+@app.command()
+def content(
+    site_id: Annotated[str, typer.Argument(help="Site ID")],
+    path: Annotated[str, typer.Argument(help="Page path relative to baseUrl")],
+    force: Annotated[bool, typer.Option("--force", help="Force fresh scrape (also clears error tracking)")] = False,
+):
+    """Get content from a specific page path."""
+    params = {"path": path}
+    if force:
+        params["max_age"] = 0  # Force fresh scrape
+
+    resp = httpx.get(
+        f"{API_BASE}/sites/{site_id}/content",
+        params=params,
+        headers=get_auth_headers(),
+        timeout=120.0,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    page_content = data["content"]
+
+    # Sanitize path for filename
+    safe_path = path.strip("/").replace("/", "_") or "index"
+    out_dir = f"./docs/{site_id}"
+    os.makedirs(out_dir, exist_ok=True)
+    out_path = f"{out_dir}/{safe_path}.md"
+
+    with open(out_path, "w") as f:
+        f.write(page_content)
+
+    cache_status = "(cached)" if data.get("from_cache") else "(fresh)"
+    print(f"Saved to {out_path} ({len(page_content)} chars) {cache_status}")
+
+
+@app.command()
+def index(
+    site_id: Annotated[str, typer.Argument(help="Site ID to index")],
+    max_concurrent: Annotated[int, typer.Option("--max-concurrent", "-c", help="Max concurrent requests")] = 50,
+):
+    """Fetch and save all pages from a site using parallel bulk API."""
+    print(f"Indexing {site_id}...", file=sys.stderr)
+
+    # Use the parallel bulk indexing API endpoint
+    resp = httpx.post(
+        f"{API_BASE}/sites/{site_id}/index",
+        params={"max_concurrent": max_concurrent},
+        headers=get_auth_headers(),
+        timeout=120.0,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+
+    cached = data.get("cached", 0)
+    scraped = data.get("scraped", 0)
+    print(
+        f"\nTotal: {data['total']} pages | Cached: {cached} | Scraped: {scraped}",
+        file=sys.stderr,
+    )
+    print(
+        f"Success: {data['successful']} | Failed: {data['failed']}",
+        file=sys.stderr,
+    )
+    if data.get("errors"):
+        print("\nFirst 10 errors:", file=sys.stderr)
+        for err in data["errors"]:
+            print(f"  {err['path']}: {err['error']}", file=sys.stderr)
+
+
+@app.command()
+def download(
+    site_id: Annotated[str, typer.Argument(help="Site ID to download")],
+    output_dir: Annotated[str, typer.Option("--output", "-o", help="Output directory")] = ".",
+):
+    """Download all documentation for a site as a ZIP file."""
+    print(f"Downloading {site_id} docs...", file=sys.stderr)
+
+    resp = httpx.get(
+        f"{API_BASE}/sites/{site_id}/download",
+        headers=get_auth_headers(),
+        timeout=120.0,
+    )
+    resp.raise_for_status()
+
+    # Save ZIP file
+    out_path = os.path.join(output_dir, f"{site_id}_docs.zip")
+    with open(out_path, "wb") as f:
+        f.write(resp.content)
+
+    # Display stats from response headers
+    total = resp.headers.get("X-Download-Total", "?")
+    cached = resp.headers.get("X-Download-Cached", "?")
+    scraped = resp.headers.get("X-Download-Scraped", "?")
+    failed = resp.headers.get("X-Download-Failed", "?")
+
+    print(f"Saved to {out_path} ({len(resp.content):,} bytes)", file=sys.stderr)
+    print(
+        f"Pages: {total} total | {cached} cached | {scraped} scraped | {failed} failed",
+        file=sys.stderr,
+    )
+
+
+@app.command(name="export")
+def export_cmd(
+    urls_file: Annotated[str, typer.Argument(help="Path to file with URLs (one per line), or '-' for stdin")],
+    output: Annotated[str, typer.Option("--output", "-o", help="Output ZIP file path")] = "docs_export.zip",
+    unzip: Annotated[bool, typer.Option("--unzip", help="Auto-extract after download")] = False,
+    scrape: Annotated[bool, typer.Option("--scrape", help="Scrape missing content (default: cached only)")] = False,
+):
+    """Export a list of URLs as a ZIP file.
+
+    URLs are auto-resolved to configured sites using longest-prefix matching.
+    By default only returns cached content (use --scrape to fetch fresh).
+    """
+    # Read URLs from file or stdin
+    if urls_file == "-":
+        urls = [line.strip() for line in sys.stdin if line.strip() and not line.startswith("#")]
     else:
-        print("Usage: docpull cache stats")
-        print("       docpull cache keys [site_id]")
-        print("       docpull cache clear <site_id>")
+        with open(urls_file) as f:
+            urls = [line.strip() for line in f if line.strip() and not line.startswith("#")]
+
+    if not urls:
+        print("Error: No URLs provided", file=sys.stderr)
+        raise typer.Exit(1)
+
+    print(f"Exporting {len(urls)} URLs (cached_only={not scrape})...", file=sys.stderr)
+
+    # Build request
+    payload = {
+        "urls": urls,
+        "cached_only": not scrape,
+        "include_manifest": True,
+    }
+
+    resp = httpx.post(
+        f"{API_BASE}/export/zip",
+        json=payload,
+        headers=get_auth_headers(),
+        timeout=600.0,  # 10 min for large exports
+        follow_redirects=True,
+    )
+    resp.raise_for_status()
+
+    # Save ZIP file
+    with open(output, "wb") as f:
+        f.write(resp.content)
+
+    # Display stats from response headers
+    total = resp.headers.get("X-Export-Total", "?")
+    ok = resp.headers.get("X-Export-Ok", "?")
+    cached = resp.headers.get("X-Export-Cached", "?")
+    scraped = resp.headers.get("X-Export-Scraped", "?")
+    miss = resp.headers.get("X-Export-Miss", "?")
+    error = resp.headers.get("X-Export-Error", "?")
+
+    print(f"Saved to {output} ({len(resp.content):,} bytes)", file=sys.stderr)
+    print(
+        f"URLs: {total} total | {ok} ok (cached: {cached}, scraped: {scraped}) | {miss} miss | {error} error",
+        file=sys.stderr,
+    )
+
+    # Auto-unzip if requested
+    if unzip:
+        import zipfile
+
+        print("Extracting to current directory...", file=sys.stderr)
+        with zipfile.ZipFile(output, "r") as zf:
+            zf.extractall(".")
+        print("Extracted to ./docs/", file=sys.stderr)
 
 
-def print_usage():
-    print("""Usage: docpull <command> [args]
-
-Commands:
-  sites                            List all available site IDs
-  discover <url>                   Analyze a docs page and suggest selectors
-  links <site_id>                  Get all doc links for a site
-  links <site_id> --save           Also save links to ./data/<site_id>_links.json
-  links <site_id> --force          Force fresh crawl (bypass cache)
-  content <site_id> <path>         Get content (uses cache if <1hr old)
-  content <site_id> <path> --force Force fresh scrape (also clears error tracking)
-  index <site_id>                  Fetch and cache all pages from a site
-  download <site_id>               Download all docs as ZIP file
-  export <urls.txt>                Export URLs to ZIP (auto-resolves sites)
-  export <urls.txt> --unzip        Export and auto-extract to ./docs/
-  export <urls.txt> --scrape       Scrape missing content (default: cached only)
-  export -                         Read URLs from stdin
-  cache stats                      Show cache statistics
-  cache keys                       List all cached URLs (pipe to export)
-  cache keys <site_id>             List cached URLs for a site
-  cache clear <site_id>            Clear cache for a site
-
-Examples:
-  docpull sites
-  docpull discover https://cursor.com/docs/get-started/quickstart
-  docpull links cursor --save
-  docpull content modal /guide
-  docpull index modal
-  docpull download modal
-  docpull export urls.txt --unzip
-  echo "https://modal.com/docs/guide" | docpull export -
-  docpull cache stats
-""")
+# --- Cache subcommands ---
 
 
-def main():
-    if len(sys.argv) < 2:
-        print_usage()
-        sys.exit(1)
+@cache_app.command(name="stats")
+def cache_stats():
+    """Show cache statistics."""
+    resp = httpx.get(f"{API_BASE}/cache/stats", headers=get_auth_headers(), timeout=30.0)
+    resp.raise_for_status()
+    data = resp.json()
+    print(f"Total cache entries: {data['total_entries']}")
+    print("\nBy type:")
+    for type_name, count in data["by_type"].items():
+        print(f"  {type_name}: {count}")
+    print("\nBy site:")
+    for site, count in data["by_site"].items():
+        print(f"  {site}: {count}")
 
-    cmd = sys.argv[1]
 
-    if cmd == "sites":
-        cmd_sites()
-    elif cmd == "discover" and len(sys.argv) >= 3:
-        cmd_discover(sys.argv[2])
-    elif cmd == "links" and len(sys.argv) >= 3:
-        save = "--save" in sys.argv
-        force = "--force" in sys.argv
-        cmd_links(sys.argv[2], save=save, force=force)
-    elif cmd == "content" and len(sys.argv) >= 4:
-        force = "--force" in sys.argv
-        cmd_content(sys.argv[2], sys.argv[3], force=force)
-    elif cmd == "index" and len(sys.argv) >= 3:
-        cmd_index(sys.argv[2])
-    elif cmd == "download" and len(sys.argv) >= 3:
-        cmd_download(sys.argv[2])
-    elif cmd == "export" and len(sys.argv) >= 3:
-        unzip = "--unzip" in sys.argv
-        scrape = "--scrape" in sys.argv
-        # Find the urls file (first non-flag argument after "export")
-        urls_file = None
-        for arg in sys.argv[2:]:
-            if not arg.startswith("--"):
-                urls_file = arg
-                break
-        if urls_file:
-            cmd_export(urls_file, unzip=unzip, scrape=scrape)
-        else:
-            print_usage()
-            sys.exit(1)
-    elif cmd == "cache" and len(sys.argv) >= 2:
-        if len(sys.argv) == 2 or sys.argv[2] == "stats":
-            cmd_cache("stats")
-        elif sys.argv[2] == "keys":
-            # Optional site_id filter
-            site_id = sys.argv[3] if len(sys.argv) >= 4 else None
-            cmd_cache("keys", site_id)
-        elif len(sys.argv) >= 4 and sys.argv[2] == "clear":
-            cmd_cache("clear", sys.argv[3])
-        else:
-            print_usage()
-            sys.exit(1)
-    elif cmd in ("--help", "-h", "help"):
-        print_usage()
-    else:
-        print_usage()
-        sys.exit(1)
+@cache_app.command(name="keys")
+def cache_keys(
+    site_id: Annotated[Optional[str], typer.Argument(help="Filter by site ID")] = None,
+):
+    """List all cached URLs (pipe to export)."""
+    params = {"content_only": "true"}
+    if site_id:
+        params["site_id"] = site_id
+    resp = httpx.get(
+        f"{API_BASE}/cache/keys", params=params, headers=get_auth_headers(), timeout=60.0
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    for entry in data["keys"]:
+        print(entry["url"])
+    print(f"\nTotal: {data['count']} cached pages", file=sys.stderr)
+
+
+@cache_app.command(name="clear")
+def cache_clear(
+    site_id: Annotated[str, typer.Argument(help="Site ID to clear cache for")],
+):
+    """Clear cache for a site."""
+    resp = httpx.delete(f"{API_BASE}/cache/{site_id}", headers=get_auth_headers(), timeout=30.0)
+    resp.raise_for_status()
+    print(f"Cleared {resp.json()['deleted']} cache entries for {site_id}")
 
 
 if __name__ == "__main__":
-    main()
+    app()
