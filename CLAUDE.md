@@ -26,7 +26,6 @@ python docpull.py export urls.txt      # Export URLs to ZIP (auto-resolves sites
 python docpull.py export urls.txt --unzip --scrape  # Export, scrape missing, extract
 
 python docpull.py bulk urls.txt        # Submit bulk job (fire-and-forget)
-python docpull.py bulk urls.txt --poll # Submit and wait for completion
 python docpull.py job <job_id>         # Check job status
 python docpull.py job <job_id> --watch # Watch live progress
 python docpull.py jobs                 # List recent jobs

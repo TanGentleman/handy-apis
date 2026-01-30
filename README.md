@@ -30,8 +30,8 @@ python docpull.py download modal            # Download site as ZIP
 
 # Bulk jobs (fire-and-forget parallel scraping)
 python docpull.py bulk urls.txt             # Submit job, returns job_id
-python docpull.py bulk urls.txt --poll      # Submit and wait for completion
 python docpull.py job <job_id>              # Check job status
+python docpull.py job <job_id> --watch      # Watch live progress
 python docpull.py jobs                      # List recent jobs
 ```
 

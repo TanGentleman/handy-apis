@@ -164,6 +164,38 @@ def html_to_markdown(html: str) -> str:
     return md(html, heading_style="ATX", strip=["script", "style"]).strip()
 
 
+def derive_wait_for(content_cfg: ContentConfig) -> str | None:
+    """Derive the waitFor selector from content config."""
+    if content_cfg.waitFor:
+        return content_cfg.waitFor
+    if content_cfg.clickSequence:
+        return content_cfg.clickSequence[0].selector
+    return content_cfg.selector
+
+
+def extract_page_content(page, content_cfg: ContentConfig) -> str:
+    """Extract content from a page using the configured method.
+
+    Assumes page is already loaded and ready. Handles click_copy vs inner_html.
+    Returns extracted content as string (markdown for inner_html, raw for click_copy).
+    """
+    if content_cfg.method == "click_copy":
+        if content_cfg.clickSequence:
+            for step in content_cfg.clickSequence:
+                page.click(step.selector)
+                page.wait_for_timeout(step.waitAfter)
+        else:
+            if not content_cfg.selector:
+                raise ValueError("click_copy method requires 'selector' or 'clickSequence'")
+            page.click(content_cfg.selector)
+            page.wait_for_timeout(1000)
+        return page.evaluate("() => navigator.clipboard.readText()")
+    else:  # inner_html
+        element = page.query_selector(content_cfg.selector)
+        raw_html = element.inner_html() if element else ""
+        return html_to_markdown(raw_html)
+
+
 def clean_url(url: str) -> str:
     """Remove query params and fragments from URL."""
     return url.split("?")[0].split("#")[0].rstrip("/")
@@ -401,64 +433,28 @@ class Scraper:
                 pass  # No error history
 
         content_cfg = config.content
-        method = content_cfg.method
-        selector = content_cfg.selector
-        click_sequence = content_cfg.clickSequence
-        # Auto-derive waitFor if not explicitly set (falls back to first click target or selector)
-        wait_for = content_cfg.waitFor
-        if not wait_for:
-            if click_sequence:
-                wait_for = click_sequence[0].selector
-            elif selector:
-                wait_for = selector
-        wait_for_timeout = content_cfg.waitForTimeoutMs
-        wait_until = content_cfg.waitUntil
-        goto_timeout = content_cfg.gotoTimeoutMs
+        wait_for = derive_wait_for(content_cfg)
 
-        print(f"[scrape_content] {url} (method={method})")
+        print(f"[scrape_content] {url} (method={content_cfg.method})")
 
         # Determine permissions based on extraction method
-        permissions = []
-        if method == "click_copy":
-            permissions = ["clipboard-read", "clipboard-write"]
+        permissions = ["clipboard-read", "clipboard-write"] if content_cfg.method == "click_copy" else []
 
         context = self.browser.new_context(permissions=permissions)
         page = context.new_page()
 
         try:
-            page.goto(url, wait_until=wait_until, timeout=goto_timeout)
+            page.goto(url, wait_until=content_cfg.waitUntil, timeout=content_cfg.gotoTimeoutMs)
 
             # Handle site-specific setup (cookie consent, etc.)
             self._dismiss_cookie_banner(page, config)
 
             # Wait for content to be ready
             if wait_for:
-                page.wait_for_selector(
-                    wait_for, state="visible", timeout=wait_for_timeout
-                )
+                page.wait_for_selector(wait_for, state="visible", timeout=content_cfg.waitForTimeoutMs)
                 page.wait_for_timeout(500)
 
-            # Extract content based on method
-            if method == "click_copy":
-                if click_sequence:
-                    # Multi-step click sequence (e.g., open dropdown, then click option)
-                    for i, step in enumerate(click_sequence):
-                        print(f"[scrape_content] Click step {i+1}: {step.selector}")
-                        page.click(step.selector)
-                        page.wait_for_timeout(step.waitAfter)
-                else:
-                    # Single click (backward compatible)
-                    if not selector:
-                        raise ValueError(
-                            "click_copy method requires 'selector' or 'clickSequence'"
-                        )
-                    page.click(selector)
-                    page.wait_for_timeout(1000)
-                content = page.evaluate("() => navigator.clipboard.readText()")
-            else:  # inner_html
-                element = page.query_selector(selector)
-                raw_html = element.inner_html() if element else ""
-                content = html_to_markdown(raw_html)
+            content = extract_page_content(page, content_cfg)
 
             print(f"[scrape_content] OK {len(content):,} chars")
 
@@ -868,29 +864,11 @@ class SiteWorker:
                 try:
                     page.goto(url, wait_until=content_cfg.waitUntil, timeout=content_cfg.gotoTimeoutMs)
 
-                    # Auto-derive waitFor
-                    wait_for = content_cfg.waitFor
-                    if not wait_for:
-                        if content_cfg.clickSequence:
-                            wait_for = content_cfg.clickSequence[0].selector
-                        elif content_cfg.selector:
-                            wait_for = content_cfg.selector
-
+                    wait_for = derive_wait_for(content_cfg)
                     if wait_for:
                         page.wait_for_selector(wait_for, state="visible", timeout=content_cfg.waitForTimeoutMs)
 
-                    if content_cfg.method == "click_copy":
-                        if content_cfg.clickSequence:
-                            for step in content_cfg.clickSequence:
-                                page.click(step.selector)
-                                page.wait_for_timeout(step.waitAfter)
-                        else:
-                            page.click(content_cfg.selector)
-                            page.wait_for_timeout(1000)
-                        content = page.evaluate("() => navigator.clipboard.readText()")
-                    else:
-                        el = page.query_selector(content_cfg.selector)
-                        content = html_to_markdown(el.inner_html()) if el else ""
+                    content = extract_page_content(page, content_cfg)
 
                     if content:
                         set_cached(cache_key, {"content": content, "url": url})
@@ -1792,10 +1770,6 @@ async def submit_bulk_job(request: BulkScrapeRequest):
 
     grouped = filter_and_group_urls(request.urls)
 
-    # Cache asset links
-    for asset in grouped["assets"]:
-        set_cached(f"{asset['site_id']}:{asset['path']}:asset", {"url": asset["url"], "type": "asset"})
-
     if not grouped["by_site"]:
         return {"job_id": "", "status": "completed", "message": "No scrapeable URLs"}
 
@@ -1859,12 +1833,13 @@ async def list_jobs(limit: int = Query(default=20, le=100)):
                 "sites": job["input"]["sites"],
                 "progress": f"{job['progress']['completed']}/{job['input']['to_scrape']}",
             })
-        except Exception:
-            pass
+        except KeyError:
+            # Job was deleted between keys() and get()
+            continue
     return {"jobs": sorted(result, key=lambda x: x["created_at"], reverse=True)}
 
 
-@app.function(min_containers=1)
+@app.function()
 @modal.concurrent(max_inputs=100)
 @modal.asgi_app(requires_proxy_auth=True)
 def fastapi_app():

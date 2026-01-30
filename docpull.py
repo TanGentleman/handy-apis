@@ -4,6 +4,7 @@
 import json
 import os
 import sys
+import time
 from typing import Annotated, Optional
 from urllib.parse import urlparse
 
@@ -465,18 +466,14 @@ def export_cmd(
 @app.command()
 def bulk(
     urls_file: Annotated[str, typer.Argument(help="Path to file with URLs (one per line), or '-' for stdin")],
-    poll: Annotated[bool, typer.Option("--poll", "-p", help="Poll for job completion")] = False,
-    interval: Annotated[int, typer.Option("--interval", "-i", help="Polling interval in seconds")] = 2,
 ):
     """Submit a bulk scrape job (fire-and-forget).
 
     Unlike 'export', this spawns parallel workers and returns immediately.
-    Use 'job <job_id>' to check progress, or --poll to wait for completion.
+    Use 'job <job_id> --watch' to monitor progress.
 
     Accepts plain text (one URL per line) or JSON files (with *_links array).
     """
-    import time as _time
-
     # Read URLs from file or stdin
     if urls_file == "-":
         urls = [line.strip() for line in sys.stdin if line.strip() and not line.startswith("#")]
@@ -519,47 +516,15 @@ def bulk(
 
     job_id = data.get("job_id")
     if not job_id:
-        print(f"No scrapeable URLs found", file=sys.stderr)
+        print("No scrapeable URLs found", file=sys.stderr)
         raise typer.Exit(0)
 
     print(f"\nJob submitted: {job_id}", file=sys.stderr)
     print(f"Batches: {data.get('batches', 0)}", file=sys.stderr)
     print(f"Sites: {data.get('input', {}).get('sites', [])}", file=sys.stderr)
     print(f"To scrape: {data.get('input', {}).get('to_scrape', 0)}", file=sys.stderr)
-
-    if not poll:
-        print(f"\nCheck progress: python docpull.py job {job_id}", file=sys.stderr)
-        print(job_id)  # Print job_id to stdout for scripting
-        return
-
-    # Poll for completion
-    print("\nPolling for completion...", file=sys.stderr)
-    while True:
-        _time.sleep(interval)
-        status_resp = httpx.get(
-            f"{API_BASE}/jobs/{job_id}",
-            headers=get_auth_headers(),
-            timeout=30.0,
-        )
-        status_resp.raise_for_status()
-        status = status_resp.json()
-
-        pct = status.get("progress_pct", 0)
-        progress = status.get("progress", {})
-        elapsed = status.get("elapsed_seconds", 0)
-        print(
-            f"  [{elapsed:.1f}s] {pct}% - success: {progress.get('success', 0)}, "
-            f"skipped: {progress.get('skipped', 0)}, failed: {progress.get('failed', 0)}",
-            file=sys.stderr,
-        )
-
-        if status.get("status") == "completed":
-            print(f"\nJob completed in {elapsed:.1f}s", file=sys.stderr)
-            if status.get("errors"):
-                print(f"Errors ({len(status['errors'])}):", file=sys.stderr)
-                for err in status["errors"][:5]:
-                    print(f"  {err.get('path', '?')}: {err.get('error', '?')[:60]}", file=sys.stderr)
-            break
+    print(f"\nWatch progress: python docpull.py job {job_id} --watch", file=sys.stderr)
+    print(job_id)  # Print job_id to stdout for scripting
 
 
 @app.command()
@@ -569,7 +534,6 @@ def job(
     interval: Annotated[int, typer.Option("--interval", "-i", help="Watch interval in seconds")] = 2,
 ):
     """Check status of a bulk scrape job."""
-    import time as _time
 
     def fetch_status():
         resp = httpx.get(
@@ -620,7 +584,7 @@ def job(
 
         if data.get("status") == "completed":
             break
-        _time.sleep(interval)
+        time.sleep(interval)
 
 
 @app.command()
