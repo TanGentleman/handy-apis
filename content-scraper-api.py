@@ -15,8 +15,19 @@ from urllib.parse import urljoin, urlparse, urlunparse
 
 import modal
 from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import PlainTextResponse, StreamingResponse
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
+
+from scraper.bulk import (
+    DEFAULT_DELAY_MS,
+    USER_AGENT,
+    JobStatus,
+    calculate_batches,
+    create_job,
+    jobs,
+    update_job_progress,
+)
+from scraper.urls import clean_url, is_asset_url, normalize_path, normalize_url
 
 # Modal image with Playwright
 playwright_image = (
@@ -31,7 +42,7 @@ playwright_image = (
         "playwright install chromium",
     )
     .pip_install("fastapi[standard]", "pydantic", "httpx", "markdownify")
-    .add_local_file("scraper/config/sites.json", "/root/sites.json")
+    .add_local_dir("scraper", "/root/scraper")
 )
 
 app = modal.App("content-scraper-api", image=playwright_image)
@@ -113,7 +124,7 @@ def load_sites_config() -> dict[str, SiteConfig]:
     Returns dict mapping site_id to validated SiteConfig.
     Raises ValidationError if config is invalid.
     """
-    config_path = Path("/root/sites.json")
+    config_path = Path("/root/scraper/config/sites.json")
     if not config_path.exists():
         # Fallback to local path during development
         config_path = Path(__file__).parent / "scraper" / "config" / "sites.json"
@@ -145,6 +156,12 @@ class ExportRequest(BaseModel):
     include_manifest: bool = True
 
 
+class BulkScrapeRequest(BaseModel):
+    """Request body for bulk scrape jobs."""
+    urls: list[str]
+    max_age: int = DEFAULT_MAX_AGE
+
+
 # --- Helper functions ---
 def html_to_markdown(html: str) -> str:
     """Convert HTML to markdown using markdownify."""
@@ -152,49 +169,36 @@ def html_to_markdown(html: str) -> str:
     return md(html, heading_style="ATX", strip=["script", "style"]).strip()
 
 
-def clean_url(url: str) -> str:
-    """Remove query params and fragments from URL."""
-    return url.split("?")[0].split("#")[0].rstrip("/")
+def derive_wait_for(content_cfg: ContentConfig) -> str | None:
+    """Derive the waitFor selector from content config."""
+    if content_cfg.waitFor:
+        return content_cfg.waitFor
+    if content_cfg.clickSequence:
+        return content_cfg.clickSequence[0].selector
+    return content_cfg.selector
 
 
-def normalize_url(url: str) -> str:
-    """Normalize URL for consistent matching.
+def extract_page_content(page, content_cfg: ContentConfig) -> str:
+    """Extract content from a page using the configured method.
 
-    - Lowercase scheme and host
-    - Remove query/fragment
-    - Collapse duplicate slashes in path
-    - Remove trailing slash (always, for consistent prefix matching)
+    Assumes page is already loaded and ready. Handles click_copy vs inner_html.
+    Returns extracted content as string (markdown for inner_html, raw for click_copy).
     """
-    url = url.strip()
-    p = urlparse(url)
-
-    scheme = (p.scheme or "https").lower()
-    netloc = (p.netloc or "").lower()
-
-    # Normalize path - keep empty for root, always strip trailing slash
-    path = p.path or ""
-    path = re.sub(r"/{2,}", "/", path)  # collapse //
-    path = path.rstrip("/")  # always remove trailing slash
-
-    return urlunparse((scheme, netloc, path, "", "", ""))
-
-
-def normalize_path(path: str) -> str:
-    """Normalize a URL path for cache keys.
-
-    - Empty string for base page
-    - Always starts with / otherwise
-    - No trailing slash
-    - No duplicate slashes
-    """
-    if not path:
-        return ""
-    path = re.sub(r"/{2,}", "/", path)
-    if not path.startswith("/"):
-        path = "/" + path
-    if path != "/" and path.endswith("/"):
-        path = path[:-1]
-    return "" if path == "/" else path
+    if content_cfg.method == "click_copy":
+        if content_cfg.clickSequence:
+            for step in content_cfg.clickSequence:
+                page.click(step.selector)
+                page.wait_for_timeout(step.waitAfter)
+        else:
+            if not content_cfg.selector:
+                raise ValueError("click_copy method requires 'selector' or 'clickSequence'")
+            page.click(content_cfg.selector)
+            page.wait_for_timeout(1000)
+        return page.evaluate("() => navigator.clipboard.readText()")
+    else:  # inner_html
+        element = page.query_selector(content_cfg.selector)
+        raw_html = element.inner_html() if element else ""
+        return html_to_markdown(raw_html)
 
 
 def get_site_resolver() -> dict:
@@ -211,7 +215,7 @@ def get_site_resolver() -> dict:
     sites = []
 
     for site_id, config in sites_config.items():
-        base_url = config.get("baseUrl", "")
+        base_url = config.baseUrl
         if base_url:
             norm_base = normalize_url(base_url)
             sites.append((norm_base, site_id))
@@ -242,6 +246,23 @@ def resolve_url_to_site(url: str) -> tuple[str | None, str, str]:
             return (site_id, path, norm_url)
 
     return (None, "", norm_url)
+
+
+def filter_and_group_urls(urls: list[str]) -> dict:
+    """Filter assets and group URLs by site for bulk processing."""
+    by_site: dict[str, list[str]] = {}
+    assets, unknown = [], []
+
+    for url in urls:
+        site_id, path, _ = resolve_url_to_site(url)
+        if not site_id:
+            unknown.append(url)
+        elif is_asset_url(url):
+            assets.append({"url": url, "site_id": site_id, "path": path})
+        else:
+            by_site.setdefault(site_id, []).append(path)
+
+    return {"by_site": by_site, "assets": assets, "unknown": unknown}
 
 
 def zip_path_for(site_id: str, path: str) -> str:
@@ -372,64 +393,28 @@ class Scraper:
                 pass  # No error history
 
         content_cfg = config.content
-        method = content_cfg.method
-        selector = content_cfg.selector
-        click_sequence = content_cfg.clickSequence
-        # Auto-derive waitFor if not explicitly set (falls back to first click target or selector)
-        wait_for = content_cfg.waitFor
-        if not wait_for:
-            if click_sequence:
-                wait_for = click_sequence[0].selector
-            elif selector:
-                wait_for = selector
-        wait_for_timeout = content_cfg.waitForTimeoutMs
-        wait_until = content_cfg.waitUntil
-        goto_timeout = content_cfg.gotoTimeoutMs
+        wait_for = derive_wait_for(content_cfg)
 
-        print(f"[scrape_content] {url} (method={method})")
+        print(f"[scrape_content] {url} (method={content_cfg.method})")
 
         # Determine permissions based on extraction method
-        permissions = []
-        if method == "click_copy":
-            permissions = ["clipboard-read", "clipboard-write"]
+        permissions = ["clipboard-read", "clipboard-write"] if content_cfg.method == "click_copy" else []
 
         context = self.browser.new_context(permissions=permissions)
         page = context.new_page()
 
         try:
-            page.goto(url, wait_until=wait_until, timeout=goto_timeout)
+            page.goto(url, wait_until=content_cfg.waitUntil, timeout=content_cfg.gotoTimeoutMs)
 
             # Handle site-specific setup (cookie consent, etc.)
             self._dismiss_cookie_banner(page, config)
 
             # Wait for content to be ready
             if wait_for:
-                page.wait_for_selector(
-                    wait_for, state="visible", timeout=wait_for_timeout
-                )
+                page.wait_for_selector(wait_for, state="visible", timeout=content_cfg.waitForTimeoutMs)
                 page.wait_for_timeout(500)
 
-            # Extract content based on method
-            if method == "click_copy":
-                if click_sequence:
-                    # Multi-step click sequence (e.g., open dropdown, then click option)
-                    for i, step in enumerate(click_sequence):
-                        print(f"[scrape_content] Click step {i+1}: {step.selector}")
-                        page.click(step.selector)
-                        page.wait_for_timeout(step.waitAfter)
-                else:
-                    # Single click (backward compatible)
-                    if not selector:
-                        raise ValueError(
-                            "click_copy method requires 'selector' or 'clickSequence'"
-                        )
-                    page.click(selector)
-                    page.wait_for_timeout(1000)
-                content = page.evaluate("() => navigator.clipboard.readText()")
-            else:  # inner_html
-                element = page.query_selector(selector)
-                raw_html = element.inner_html() if element else ""
-                content = html_to_markdown(raw_html)
+            content = extract_page_content(page, content_cfg)
 
             print(f"[scrape_content] OK {len(content):,} chars")
 
@@ -773,6 +758,107 @@ class Scraper:
             context.close()
 
 
+# --- SiteWorker for Bulk Jobs ---
+@app.cls(timeout=600, retries=1, image=playwright_image)
+class SiteWorker:
+    """Worker for bulk batch processing with browser lifecycle."""
+
+    @modal.enter()
+    def start_browser(self):
+        """Launch browser once when container starts."""
+        from playwright.sync_api import sync_playwright
+
+        self.pw = sync_playwright().start()
+        self.browser = self.pw.chromium.launch()
+        print("SiteWorker browser started")
+
+    @modal.exit()
+    def close_browser(self):
+        """Clean up browser when container exits."""
+        self.browser.close()
+        self.pw.stop()
+        print("SiteWorker browser closed")
+
+    @modal.method()
+    def process_batch(
+        self,
+        job_id: str,
+        site_id: str,
+        paths: list[str],
+        delay_ms: int = DEFAULT_DELAY_MS,
+        max_age: int = DEFAULT_MAX_AGE,
+    ) -> dict:
+        """Process a batch of paths for a single site."""
+        config = load_sites_config().get(site_id)
+        if not config:
+            result = {"success": 0, "failed": len(paths), "skipped": 0, "errors": [{"path": "*", "error": f"Unknown site: {site_id}"}]}
+            update_job_progress(job_id, result)
+            return result
+
+        content_cfg = config.content
+        permissions = ["clipboard-read", "clipboard-write"] if content_cfg.method == "click_copy" else []
+
+        context = self.browser.new_context(user_agent=USER_AGENT, permissions=permissions)
+        page = context.new_page()
+        results = {"success": 0, "skipped": 0, "failed": 0, "errors": []}
+
+        try:
+            for i, path in enumerate(paths):
+                cache_key = f"{site_id}:{path}"
+                url = config.baseUrl + path
+
+                # Skip if cached
+                if get_cached(cache_key, max_age):
+                    results["skipped"] += 1
+                    continue
+
+                # Skip if error threshold exceeded
+                try:
+                    err = error_tracker.get(cache_key, {})
+                    if err.get("count", 0) >= ERROR_THRESHOLD and time.time() - err.get("timestamp", 0) < ERROR_EXPIRY:
+                        results["skipped"] += 1
+                        continue
+                except KeyError:
+                    pass
+
+                try:
+                    page.goto(url, wait_until=content_cfg.waitUntil, timeout=content_cfg.gotoTimeoutMs)
+
+                    wait_for = derive_wait_for(content_cfg)
+                    if wait_for:
+                        page.wait_for_selector(wait_for, state="visible", timeout=content_cfg.waitForTimeoutMs)
+
+                    content = extract_page_content(page, content_cfg)
+
+                    if content:
+                        set_cached(cache_key, {"content": content, "url": url})
+                        results["success"] += 1
+                        try:
+                            error_tracker.pop(cache_key, None)
+                        except Exception:
+                            pass
+                    else:
+                        results["failed"] += 1
+                        results["errors"].append({"path": path, "error": "Empty content"})
+
+                except Exception as e:
+                    results["failed"] += 1
+                    results["errors"].append({"path": path, "error": str(e)[:200]})
+                    try:
+                        err = error_tracker.get(cache_key, {})
+                        error_tracker[cache_key] = {"count": err.get("count", 0) + 1, "last_error": str(e)[:200], "timestamp": time.time()}
+                    except Exception:
+                        pass
+
+                if i < len(paths) - 1:
+                    time.sleep(delay_ms / 1000)
+        finally:
+            context.close()
+
+        update_job_progress(job_id, results)
+        return results
+
+
 # --- HTTP-based Link Discovery ---
 @app.function(timeout=300)
 async def scrape_links_fetch(site_id: str) -> dict:
@@ -848,7 +934,7 @@ async def root():
     """API root with endpoint documentation."""
     return {
         "name": "Content Scraper API",
-        "version": "7.0",
+        "version": "8.0",
         "storage": "Modal Dict (7-day TTL)",
         "endpoints": {
             "/sites": "GET - List available site IDs",
@@ -858,6 +944,9 @@ async def root():
             "/sites/{site_id}/index": "POST - Fetch all pages in parallel",
             "/sites/{site_id}/download": "GET - Download all docs as ZIP file",
             "/export/zip": "POST - Export list of URLs as ZIP (auto-resolves sites)",
+            "/jobs/bulk": "POST - Submit bulk scrape job (fire-and-forget)",
+            "/jobs/{job_id}": "GET - Get job status",
+            "/jobs": "GET - List recent jobs",
             "/cache/keys": "GET - List cached URLs (content_only=true, site_id=optional)",
             "/cache/stats": "GET - Get cache statistics",
             "/cache/{site_id}": "DELETE - Clear cache for a site",
@@ -866,11 +955,12 @@ async def root():
         },
         "features": [
             "Links caching (when >1 link)",
-            "Content caching (7 day default)",
+            "Content caching (7-day default)",
             "Error tracking (skip after 3 failures, auto-expire 24h, force clears)",
             "Parallel bulk indexing (50 concurrent)",
             "ZIP download with folder structure",
             "URL-based export with auto site resolution (longest-prefix match)",
+            "Bulk job queue with fire-and-forget workers (up to 100 containers)",
         ],
     }
 
@@ -1184,16 +1274,20 @@ async def index_site(
     links = links_response.links
     base_url = config.baseUrl
 
-    # Extract paths from links
+    # Extract paths from links, filtering out assets
     paths = []
+    skipped_assets = 0
     for link in links:
+        # Skip asset URLs (PDFs, images, feeds, etc.)
+        if is_asset_url(link):
+            skipped_assets += 1
+            continue
+
         if link.startswith(base_url):
-            path = link[len(base_url) :]
+            path = link[len(base_url):]
             paths.append(path)
         else:
             # Handle links with different scheme or www
-            from urllib.parse import urlparse
-
             link_parsed = urlparse(link)
             base_parsed = urlparse(base_url)
             if link_parsed.netloc == base_parsed.netloc:
@@ -1245,6 +1339,7 @@ async def index_site(
     return {
         "site_id": site_id,
         "total": len(paths),
+        "skipped_assets": skipped_assets,
         "cached": cached_count,
         "scraped": len(paths_to_scrape),
         "successful": successful,
@@ -1619,6 +1714,88 @@ async def export_urls_as_zip(request: ExportRequest):
             "X-Export-Error": str(error_count + len(unknown_urls)),
         }
     )
+
+
+# --- Bulk Job Endpoints ---
+@web_app.post("/jobs/bulk")
+async def submit_bulk_job(request: BulkScrapeRequest):
+    """Submit a bulk scrape job (fire-and-forget).
+
+    Groups URLs by site, distributes across workers, and returns immediately.
+    Use GET /jobs/{job_id} to check progress.
+    """
+    if not request.urls:
+        raise HTTPException(400, "No URLs provided")
+
+    grouped = filter_and_group_urls(request.urls)
+
+    if not grouped["by_site"]:
+        return {"job_id": "", "status": "completed", "message": "No scrapeable URLs"}
+
+    job_id = create_job(request.urls, grouped["by_site"], grouped["assets"], grouped["unknown"])
+    batches = calculate_batches(grouped["by_site"])
+
+    job = jobs[job_id]
+    job["status"] = JobStatus.IN_PROGRESS
+    job["workers"]["total"] = len(batches)
+    jobs[job_id] = job
+
+    # Spawn workers (fire-and-forget)
+    worker = SiteWorker()
+    for batch in batches:
+        worker.process_batch.spawn(job_id, batch["site_id"], batch["paths"], max_age=request.max_age)
+
+    print(f"[submit_bulk_job] job_id={job_id}, batches={len(batches)}, sites={list(grouped['by_site'].keys())}")
+
+    return {
+        "job_id": job_id,
+        "status": "in_progress",
+        "batches": len(batches),
+        "input": job["input"],
+    }
+
+
+@web_app.get("/jobs/{job_id}")
+async def get_job_status(job_id: str):
+    """Get the status of a bulk scrape job."""
+    try:
+        job = jobs[job_id]
+    except KeyError:
+        raise HTTPException(404, f"Job not found: {job_id}")
+
+    total = job["input"]["to_scrape"]
+    pct = round((job["progress"]["completed"] / total) * 100, 1) if total else 100
+
+    return {
+        "job_id": job_id,
+        "status": job["status"],
+        "progress_pct": pct,
+        "elapsed_seconds": round(time.time() - job["created_at"], 1),
+        "input": job["input"],
+        "progress": job["progress"],
+        "workers": job["workers"],
+        "errors": job["errors"][:10],
+    }
+
+
+@web_app.get("/jobs")
+async def list_jobs(limit: int = Query(default=20, le=100)):
+    """List recent bulk scrape jobs."""
+    result = []
+    for job_id in list(jobs.keys())[-limit:]:
+        try:
+            job = jobs[job_id]
+            result.append({
+                "job_id": job_id,
+                "status": job["status"],
+                "created_at": job["created_at"],
+                "sites": job["input"]["sites"],
+                "progress": f"{job['progress']['completed']}/{job['input']['to_scrape']}",
+            })
+        except KeyError:
+            # Job was deleted between keys() and get()
+            continue
+    return {"jobs": sorted(result, key=lambda x: x["created_at"], reverse=True)}
 
 
 @app.function(schedule=modal.Period(days=6))

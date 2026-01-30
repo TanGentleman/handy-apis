@@ -3,11 +3,13 @@
 Usage:
     python tests/test_modal.py           # Run all tests sequentially
     python tests/test_modal.py parallel  # Fetch all sites in parallel
+    python tests/test_modal.py bulk      # Test bulk job endpoints
 """
 
 import asyncio
 import os
 import sys
+import time
 
 import httpx
 from dotenv import load_dotenv
@@ -21,6 +23,7 @@ API_BASE = os.environ.get(
 
 DEFAULT_TIMEOUT = 15.0
 CONTENT_TIMEOUT = 180.0
+BULK_TIMEOUT = 300.0
 MAX_CONCURRENCY = 50
 
 
@@ -200,8 +203,235 @@ async def run_parallel_tests():
     print("=" * 60)
 
 
+def test_jobs_list():
+    """Test GET /jobs endpoint."""
+    print("\nJobs list...")
+    resp = httpx.get(
+        f"{API_BASE}/jobs",
+        headers=get_auth_headers(),
+        timeout=DEFAULT_TIMEOUT,
+    )
+    if resp.status_code == 200:
+        data = resp.json()
+        print(f"  ✓ {len(data.get('jobs', []))} jobs")
+        return data
+    else:
+        print(f"  ✗ HTTP {resp.status_code}")
+        return None
+
+
+def test_job_status(job_id: str) -> dict | None:
+    """Test GET /jobs/{job_id} endpoint."""
+    print(f"\nJob status ({job_id})...")
+    resp = httpx.get(
+        f"{API_BASE}/jobs/{job_id}",
+        headers=get_auth_headers(),
+        timeout=DEFAULT_TIMEOUT,
+    )
+    if resp.status_code == 200:
+        data = resp.json()
+        print(f"  ✓ status={data['status']}, progress={data['progress_pct']}%")
+        return data
+    elif resp.status_code == 404:
+        print(f"  ✗ Job not found")
+        return None
+    else:
+        print(f"  ✗ HTTP {resp.status_code}")
+        return None
+
+
+def test_bulk_submit(urls: list[str], max_age: int | None = None) -> str | None:
+    """Test POST /jobs/bulk endpoint."""
+    print(f"\nBulk submit ({len(urls)} URLs)...")
+    payload = {"urls": urls}
+    if max_age is not None:
+        payload["max_age"] = max_age
+    resp = httpx.post(
+        f"{API_BASE}/jobs/bulk",
+        json=payload,
+        headers=get_auth_headers(),
+        timeout=BULK_TIMEOUT,
+    )
+    if resp.status_code == 200:
+        data = resp.json()
+        job_id = data.get("job_id")
+        if job_id:
+            print(f"  ✓ job_id={job_id}, batches={data.get('batches', 0)}")
+            # Verify expected response fields
+            assert "input" in data, "Missing 'input' in response"
+            assert "status" in data, "Missing 'status' in response"
+            return job_id
+        else:
+            print(f"  ✓ No job needed: {data.get('message', 'completed')}")
+            return None
+    else:
+        print(f"  ✗ HTTP {resp.status_code}: {resp.text[:100]}")
+        return None
+
+
+def wait_for_job(job_id: str, timeout_seconds: int = 120) -> dict | None:
+    """Poll job status until completed or timeout."""
+    print(f"\nWaiting for job {job_id}...")
+    start = time.time()
+    last_pct = -1
+    while time.time() - start < timeout_seconds:
+        status = test_job_status(job_id)
+        if status is None:
+            return None
+        if status["status"] == "completed":
+            progress = status.get("progress", {})
+            success = progress.get("success", 0)
+            skipped = progress.get("skipped", 0)
+            failed = progress.get("failed", 0)
+            print(f"  ✓ Completed in {status['elapsed_seconds']}s "
+                  f"(success={success}, skipped={skipped}, failed={failed})")
+            return status
+        # Only sleep if progress hasn't changed (avoid spamming on fast jobs)
+        curr_pct = status.get("progress_pct", 0)
+        if curr_pct == last_pct:
+            time.sleep(2)
+        else:
+            last_pct = curr_pct
+            time.sleep(1)
+    print(f"  ✗ Timeout after {timeout_seconds}s")
+    return None
+
+
+def run_bulk_tests():
+    """Test bulk job endpoints."""
+    print(f"Testing Bulk Job API: {API_BASE}")
+    print("=" * 60)
+
+    # Test listing jobs (should work even if empty)
+    test_jobs_list()
+
+    # Test job status for non-existent job
+    print("\nTesting non-existent job...")
+    test_job_status("nonexistent")
+
+    # Test bulk submit with empty URLs
+    print("\nTesting empty URL list...")
+    resp = httpx.post(
+        f"{API_BASE}/jobs/bulk",
+        json={"urls": []},
+        headers=get_auth_headers(),
+        timeout=DEFAULT_TIMEOUT,
+    )
+    if resp.status_code == 400:
+        print("  ✓ Correctly rejected empty URLs")
+    else:
+        print(f"  ✗ Expected 400, got {resp.status_code}")
+
+    # Test bulk submit with unknown URLs only
+    print("\nTesting unknown URLs...")
+    job_id = test_bulk_submit(["https://unknown-site.example.com/page"])
+    if job_id is None:
+        print("  ✓ No job created for unknown URLs")
+
+    # Test bulk submit with asset URLs only
+    print("\nTesting asset URLs...")
+    job_id = test_bulk_submit([
+        "https://docs.modal.com/file.pdf",
+        "https://docs.modal.com/image.png",
+    ])
+    # Assets should be filtered, so may result in no job or empty job
+
+    # Test bulk submit with valid URLs (using modal as example)
+    print("\nTesting valid URLs...")
+    valid_urls = [
+        "https://modal.com/docs/guide",
+        "https://modal.com/docs/examples",
+    ]
+    job_id = test_bulk_submit(valid_urls)
+    if job_id:
+        # Wait for job to complete
+        final_status = wait_for_job(job_id, timeout_seconds=60)
+        if final_status:
+            print(f"\nFinal progress: {final_status['progress']}")
+            if final_status.get("errors"):
+                print(f"Errors: {final_status['errors'][:3]}")
+
+    # Test bulk submit with high max_age (should use cache from previous run)
+    print("\nTesting with cache (high max_age)...")
+    job_id = test_bulk_submit(valid_urls, max_age=86400 * 7)  # 7 days
+    if job_id:
+        final_status = wait_for_job(job_id, timeout_seconds=30)
+        if final_status:
+            skipped = final_status.get("progress", {}).get("skipped", 0)
+            if skipped > 0:
+                print(f"  ✓ Cache working: {skipped} URLs skipped (already cached)")
+
+    # List jobs again to see the new job
+    print("\n" + "=" * 60)
+    test_jobs_list()
+
+    print("\n" + "=" * 60)
+    print("Bulk tests completed!")
+
+
+def run_sequential_tests():
+    """Run all tests sequentially with verbose output."""
+    print(f"Testing API: {API_BASE}")
+    print("=" * 60)
+
+    # Basic endpoints
+    tests = [
+        ("Root", f"{API_BASE}/", None),
+        ("Health", f"{API_BASE}/health", None),
+        ("Sites", f"{API_BASE}/sites", None),
+    ]
+
+    for name, url, params in tests:
+        print(f"\n{name} endpoint...")
+        resp = httpx.get(
+            url, params=params, headers=get_auth_headers(), timeout=DEFAULT_TIMEOUT
+        )
+        if resp.status_code == 200:
+            print(f"  ✓ {resp.json()}")
+        else:
+            print(f"  ✗ HTTP {resp.status_code}: {resp.text[:100]}")
+
+    # Links endpoint
+    print("\nLinks (modal)...")
+    resp = httpx.get(
+        f"{API_BASE}/sites/modal/links",
+        headers=get_auth_headers(),
+        timeout=CONTENT_TIMEOUT,
+    )
+    if resp.status_code == 200:
+        print(f"  ✓ {resp.json()['count']} links")
+    else:
+        print(f"  ✗ HTTP {resp.status_code}")
+
+    # Content endpoint
+    print("\nContent (modal /guide)...")
+    resp = httpx.get(
+        f"{API_BASE}/sites/modal/content",
+        params={"path": "/guide"},
+        headers=get_auth_headers(),
+        timeout=CONTENT_TIMEOUT,
+    )
+    if resp.status_code == 200:
+        print(f"  ✓ {resp.json()['content_length']} chars")
+    else:
+        print(f"  ✗ HTTP {resp.status_code}")
+
+    # Jobs list endpoint
+    test_jobs_list()
+
+    print("\n" + "=" * 60)
+    print("Sequential tests completed!")
+
+
 if __name__ == "__main__":
-    if len(sys.argv) > 1 and sys.argv[1] == "parallel":
-        asyncio.run(run_parallel_tests())
+    if len(sys.argv) > 1:
+        if sys.argv[1] == "parallel":
+            asyncio.run(run_parallel_tests())
+        elif sys.argv[1] == "bulk":
+            run_bulk_tests()
+        else:
+            print(f"Unknown command: {sys.argv[1]}")
+            print("Usage: python tests/test_modal.py [parallel|bulk]")
+            sys.exit(1)
     else:
         run_sequential_tests()

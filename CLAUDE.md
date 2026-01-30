@@ -2,100 +2,53 @@
 
 Documentation scraper: CLI fetches docs via Modal API, saves as markdown.
 
-## Development
+## Quick Reference
 
-Start the dev server (hot reloads on save):
+| Task | Command |
+|------|---------|
+| Get a single page | `python docpull.py content <site> <path>` |
+| Download entire site as ZIP | `python docpull.py download <site>` |
+| Scrape many URLs (async) | `python docpull.py bulk urls.txt` |
+| Check available sites | `python docpull.py sites` |
+| Add a new site | `python docpull.py discover <url>` |
+
+## When to Use What
+
+- **One page** → `content modal /guide`
+- **Whole site** → `download modal` (returns ZIP)
+- **Many URLs across sites** → `bulk urls.txt` then `job <id> --watch`
+- **New site not configured** → `discover <url>`, add config to `scraper/config/sites.json`
+
+## Common Workflows
+
+**Download docs for a configured site:**
 ```bash
-modal serve content-scraper-api.py
+python docpull.py download modal
+# Output: modal_docs.zip with docs/modal/*.md
 ```
 
-Then use `docpull.py` immediately in another terminal. Changes to `content-scraper-api.py` or `sites.json` auto-reload—no restart needed.
-
-## Commands
-
+**Bulk scrape specific URLs:**
 ```bash
-uv sync                                # Install deps
+# Create urls.txt with URLs (one per line)
+python docpull.py bulk urls.txt    # Returns job_id
+python docpull.py job <job_id> --watch
+```
 
-python docpull.py sites                # List sites
-python docpull.py discover <url>       # Auto-discover selectors for new site
-python docpull.py links <site>         # Get links (--force bypasses cache)
-python docpull.py content <site> <path> # Fetch page (--force clears errors)
-python docpull.py index <site>         # Bulk fetch all pages
-python docpull.py download <site>      # Download site as ZIP
-python docpull.py export urls.txt      # Export URLs to ZIP (auto-resolves sites)
-python docpull.py export urls.txt --unzip --scrape  # Export, scrape missing, extract
-python docpull.py cache stats          # Cache stats
-python docpull.py cache clear <site>   # Clear cache
+**Add a new documentation site:**
+```bash
+python docpull.py discover https://docs.example.com/getting-started
+# Copy suggested config to scraper/config/sites.json
+python docpull.py links example    # Verify links work
+python docpull.py content example /getting-started  # Test content
 ```
 
 ## Key Files
 
-- `docpull.py` - CLI client
-- `content-scraper-api.py` - Modal API (FastAPI + Playwright)
-- `scraper/config/sites.json` - Site configs
+- `scraper/config/sites.json` - Site configurations
+- `README.md` - Setup, architecture, config options
+- `content-scraper-api.py` - API endpoints and implementation details
 
-## Adding a Site (Fast Way)
+## Flags
 
-Use the `discover` command to automatically find selectors:
-
-```bash
-python docpull.py discover https://developers.example.com/docs/getting-started
-```
-
-This will:
-1. Detect the documentation framework (Docusaurus, Mintlify, GitBook, etc.)
-2. Test copy buttons and find working selectors
-3. Rank content selectors by quality
-4. Analyze link patterns
-5. Generate ready-to-use configuration
-
-Copy the suggested config to `scraper/config/sites.json`, then test:
-
-```bash
-python docpull.py links your-site-id
-python docpull.py content your-site-id <path>
-python docpull.py index your-site-id
-```
-
-## Adding a Site (Manual)
-
-Add to `scraper/config/sites.json`:
-
-```json
-"site-id": {
-  "name": "Site Name",
-  "baseUrl": "https://docs.example.com",
-  "mode": "fetch",
-  "links": {
-    "startUrls": ["/section1", "/section2"],
-    "pattern": "docs.example.com",
-    "maxDepth": 1
-  },
-  "content": {
-    "mode": "browser",
-    "selector": "#content",
-    "method": "inner_html"
-  }
-}
-```
-
-### Configuration Options
-
-- `mode`: `fetch` (HTTP crawl) or `browser` (Playwright for JS sites)
-- `maxDepth`: Only affects fetch mode (browser just extracts from startUrls)
-- `method`: `inner_html` (extract HTML) or `click_copy` (for copy buttons)
-- `clickSequence`: For multi-step copy buttons (e.g., dropdown menus), use an array of click steps:
-
-```json
-"content": {
-  "method": "click_copy",
-  "clickSequence": [
-    { "selector": "//button[@title='Copy page']", "waitAfter": 500 },
-    { "selector": "button.menu-item:has-text('Copy page')", "waitAfter": 1000 }
-  ]
-}
-```
-
-Each step requires `selector` and optionally `waitAfter` (ms, default 500).
-
-**Note:** `waitFor` is auto-derived from `clickSequence[0].selector` or `selector` if not explicitly set, so you rarely need to specify it.
+- `--force` - Bypass cache, clear error tracking, retry failed pages
+- `--watch` - Live progress for bulk jobs

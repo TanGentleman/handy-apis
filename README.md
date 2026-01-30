@@ -24,9 +24,15 @@ modal deploy content-scraper-api.py
 ```bash
 python docpull.py sites                     # List available sites
 python docpull.py links modal               # Get all doc links
-python docpull.py links modal --force       # Bypass cache
 python docpull.py content modal /guide      # Fetch single page
 python docpull.py index modal               # Bulk fetch entire site
+python docpull.py download modal            # Download site as ZIP
+
+# Bulk jobs (fire-and-forget parallel scraping)
+python docpull.py bulk urls.txt             # Submit job, returns job_id
+python docpull.py job <job_id>              # Check job status
+python docpull.py job <job_id> --watch      # Watch live progress
+python docpull.py jobs                      # List recent jobs
 ```
 
 Output: `./docs/<site>/<path>.md`
@@ -36,12 +42,15 @@ Output: `./docs/<site>/<path>.md`
 ```
 docpull.py (CLI) ──▶ content-scraper-api.py (Modal)
                            │
-              ┌────────────┴────────────┐
-              ▼                         ▼
-      modal.Dict (cache)        modal.Dict (errors)
-      - Content & links         - Failed link tracker
-      - 1h default TTL          - 24h auto-expiry
+              ┌────────────┼────────────┐
+              ▼            ▼            ▼
+       modal.Dict    modal.Dict    modal.Dict
+        (cache)       (errors)       (jobs)
 ```
+
+**Scraping modes:**
+- `index` - Sequential scraping, one container
+- `bulk` - Parallel scraping, up to 100 containers via `.spawn()`
 
 **Link discovery:**
 - `mode: "fetch"` - HTTP crawl from `startUrls`, follows links to `maxDepth`
@@ -72,7 +81,13 @@ Site configs in `scraper/config/sites.json`. Key fields:
 GET  /sites                    # List sites
 GET  /sites/{id}/links         # Get doc links
 GET  /sites/{id}/content       # Get page content
-POST /sites/{id}/index         # Bulk fetch
+POST /sites/{id}/index         # Bulk fetch (sequential)
+GET  /sites/{id}/download      # Download as ZIP
+
+POST /jobs/bulk                # Submit parallel job
+GET  /jobs/{job_id}            # Job status
+GET  /jobs                     # List jobs
+
 GET  /cache/stats              # Cache stats
 DELETE /cache/{id}             # Clear cache
 ```
