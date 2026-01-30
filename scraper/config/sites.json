@@ -8,15 +8,25 @@
       "mode": "fetch",
       "extractor": "modal",
       "links": {
-        "startUrls": ["/guide", "/reference", "/examples"],
+        "startUrls": [
+          "/guide",
+          "/reference",
+          "/examples"
+        ],
         "pattern": "/docs",
         "maxDepth": 1
       },
       "content": {
         "method": "click_copy",
         "clickSequence": [
-          { "selector": "//button[@title='Copy page']", "waitAfter": 500 },
-          { "selector": "button.menu-item:has-text('Copy page')", "waitAfter": 1000 }
+          {
+            "selector": "//button[@title='Copy page']",
+            "waitAfter": 500
+          },
+          {
+            "selector": "button.menu-item:has-text('Copy page')",
+            "waitAfter": 1000
+          }
         ]
       }
     },
@@ -27,7 +37,9 @@
       "mode": "fetch",
       "extractor": "convex",
       "links": {
-        "startUrls": ["/home"],
+        "startUrls": [
+          "/home"
+        ],
         "pattern": "docs.convex.dev/",
         "maxDepth": 2
       },
@@ -42,7 +54,9 @@
       "testPath": "/tracing/trace_explorer",
       "mode": "fetch",
       "links": {
-        "startUrls": [""],
+        "startUrls": [
+          ""
+        ],
         "pattern": "docs.datadoghq.com/",
         "maxDepth": 3
       },
@@ -59,7 +73,9 @@
       "mode": "browser",
       "extractor": "terraform",
       "links": {
-        "startUrls": [""],
+        "startUrls": [
+          ""
+        ],
         "pattern": "/providers/hashicorp/aws/latest/docs",
         "waitFor": "#provider-docs-content",
         "waitUntil": "domcontentloaded"
@@ -77,7 +93,9 @@
       "mode": "browser",
       "extractor": "cursor",
       "links": {
-        "startUrls": [""],
+        "startUrls": [
+          ""
+        ],
         "pattern": "/docs/",
         "waitUntil": "networkidle",
         "maxDepth": 1
@@ -93,7 +111,9 @@
       "testPath": "/agent-sdk/mcp",
       "mode": "fetch",
       "links": {
-        "startUrls": ["/intro"],
+        "startUrls": [
+          "/intro"
+        ],
         "pattern": "/docs/en/",
         "maxDepth": 2
       },
@@ -108,7 +128,9 @@
       "testPath": "/headless",
       "mode": "fetch",
       "links": {
-        "startUrls": [""],
+        "startUrls": [
+          ""
+        ],
         "pattern": "/docs/en/",
         "maxDepth": 1
       },
@@ -124,7 +146,9 @@
       "mode": "fetch",
       "extractor": "unsloth",
       "links": {
-        "startUrls": [""],
+        "startUrls": [
+          ""
+        ],
         "pattern": "/docs/",
         "maxDepth": 1,
         "gotoTimeoutMs": 15000
@@ -141,7 +165,9 @@
       "mode": "browser",
       "extractor": "playwright",
       "links": {
-        "startUrls": ["/library"],
+        "startUrls": [
+          "/library"
+        ],
         "pattern": "/python/docs/"
       },
       "content": {
@@ -156,7 +182,9 @@
       "testPath": "/getting-started/introduction",
       "mode": "fetch",
       "links": {
-        "startUrls": [""],
+        "startUrls": [
+          ""
+        ],
         "pattern": "/docs",
         "maxDepth": 2
       },
@@ -171,7 +199,9 @@
       "testPath": "/articles/9286512171-quick-start",
       "mode": "browser",
       "links": {
-        "startUrls": [""],
+        "startUrls": [
+          ""
+        ],
         "pattern": "/articles/",
         "waitUntil": "networkidle"
       },
@@ -187,7 +217,9 @@
       "testPath": "/windsurf/cascade/hooks",
       "mode": "fetch",
       "links": {
-        "startUrls": ["/windsurf/getting-started"],
+        "startUrls": [
+          "/windsurf/getting-started"
+        ],
         "pattern": "docs.windsurf.com",
         "maxDepth": 2
       },
@@ -195,6 +227,79 @@
         "mode": "browser",
         "waitFor": "#content",
         "selector": "#content",
+        "method": "inner_html"
+      }
+    },
+    "cocoindex": {
+      "name": "CocoIndex",
+      "baseUrl": "https://cocoindex.io/docs",
+      "testPath": "/getting_started/quickstart",
+      "mode": "fetch",
+      "links": {
+        "startUrls": [
+          ""
+        ],
+        "pattern": "/docs",
+        "maxDepth": 2
+      },
+      "content": {
+        "mode": "browser",
+        "waitFor": "main",
+        "selector": "main",
+        "method": "inner_html"
+      }
+    },
+    "crawl4ai": {
+      "name": "Crawl4AI",
+      "baseUrl": "https://docs.crawl4ai.com",
+      "mode": "fetch",
+      "links": {
+        "startUrls": [
+          ""
+        ],
+        "pattern": "/",
+        "maxDepth": 2
+      },
+      "content": {
+        "mode": "browser",
+        "waitFor": "main",
+        "selector": "main",
+        "method": "inner_html"
+      }
+    },
+    "opencode": {
+      "name": "OpenCode",
+      "baseUrl": "https://opencode.ai/docs",
+      "mode": "fetch",
+      "links": {
+        "startUrls": [
+          ""
+        ],
+        "pattern": "/docs",
+        "maxDepth": 2
+      },
+      "content": {
+        "mode": "browser",
+        "waitFor": "main",
+        "selector": "main",
+        "method": "inner_html"
+      }
+    },
+    "mistral": {
+      "name": "Mistral",
+      "baseUrl": "https://docs.mistral.ai",
+      "mode": "fetch",
+      "links": {
+        "startUrls": [
+          ""
+        ],
+        "pattern": "",
+        "maxDepth": 2
+      },
+      "content": {
+        "mode": "browser",
+        "waitFor": "main",
+        "selector": "main",
         "method": "inner_html"
       }
     }
