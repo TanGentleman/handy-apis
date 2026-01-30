@@ -1,9 +1,11 @@
 """Local UI server for docpull workflow."""
 
-import asyncio
+import ipaddress
 import json
+import socket
 import subprocess
 from pathlib import Path
+from urllib.parse import urlparse
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -12,12 +14,53 @@ from pydantic import BaseModel
 
 app = FastAPI(title="Docpull UI Server")
 
+# Restrict CORS to local UI only
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=["http://127.0.0.1:8080", "http://localhost:8080"],
+    allow_methods=["GET", "POST", "DELETE"],
+    allow_headers=["Content-Type"],
 )
+
+
+def validate_url(url: str) -> str | None:
+    """Validate URL to prevent SSRF attacks. Returns error message or None if valid."""
+    try:
+        parsed = urlparse(url)
+    except Exception:
+        return "Invalid URL format"
+
+    # Only allow http/https
+    if parsed.scheme not in ("http", "https"):
+        return f"Invalid scheme '{parsed.scheme}'. Only http/https allowed"
+
+    if not parsed.netloc:
+        return "Missing hostname"
+
+    hostname = parsed.hostname
+    if not hostname:
+        return "Missing hostname"
+
+    # Block localhost variants
+    blocked_hosts = {"localhost", "127.0.0.1", "::1", "0.0.0.0"}
+    if hostname.lower() in blocked_hosts:
+        return "Localhost URLs are not allowed"
+
+    # Resolve hostname and check for internal IPs
+    try:
+        resolved_ips = socket.getaddrinfo(hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
+        for family, _, _, _, sockaddr in resolved_ips:
+            ip_str = sockaddr[0]
+            ip = ipaddress.ip_address(ip_str)
+
+            # Block private, loopback, and link-local addresses
+            if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
+                return f"Internal/private IP addresses are not allowed ({ip_str})"
+    except socket.gaierror:
+        # Can't resolve - let the CLI handle it
+        pass
+
+    return None
 
 SITES_JSON = Path(__file__).parent / "scraper" / "config" / "sites.json"
 
@@ -80,6 +123,10 @@ async def list_sites():
 @app.post("/api/discover")
 async def discover(req: DiscoverRequest):
     """Run docpull discover on a URL."""
+    # Validate URL to prevent SSRF
+    if error := validate_url(req.url):
+        raise HTTPException(400, error)
+
     result = run_command(["python", "docpull.py", "discover", req.url], timeout=60)
     return result
 
