@@ -1798,6 +1798,25 @@ async def list_jobs(limit: int = Query(default=20, le=100)):
     return {"jobs": sorted(result, key=lambda x: x["created_at"], reverse=True)}
 
 
+@app.function(schedule=modal.Period(days=6))
+def refresh_cache():
+    """Refresh cache entries to prevent Modal Dict expiration.
+
+    Modal Dict entries expire after 7 days of inactivity (no reads or writes).
+    This cron job runs every 6 days and reads all cache entries to keep them alive.
+    """
+    keys = list(cache.keys())
+    refreshed = 0
+    for key in keys:
+        try:
+            _ = cache[key]  # Read to prevent expiration
+            refreshed += 1
+        except KeyError:
+            pass
+    print(f"[refresh_cache] Refreshed {refreshed}/{len(keys)} cache entries")
+    return {"refreshed": refreshed, "total_keys": len(keys)}
+
+
 @app.function()
 @modal.concurrent(max_inputs=100)
 @modal.asgi_app(requires_proxy_auth=True)
