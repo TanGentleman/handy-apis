@@ -1623,7 +1623,7 @@ async def export_urls_as_zip(request: ExportRequest):
 
 @app.function()
 @modal.concurrent(max_inputs=100)
-@modal.asgi_app()
+@modal.asgi_app(requires_proxy_auth=True)
 def fastapi_app():
     """FastAPI app with concurrent request handling."""
     return web_app

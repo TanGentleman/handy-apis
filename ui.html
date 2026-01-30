@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Docpull - Add Site</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 20px;
+      background: #0d1117;
+      color: #c9d1d9;
+    }
+    h1 { color: #58a6ff; margin-bottom: 8px; }
+    .subtitle { color: #8b949e; margin-bottom: 24px; }
+
+    .step {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      padding: 20px;
+      margin-bottom: 16px;
+    }
+    .step-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+    .step-number {
+      background: #238636;
+      color: white;
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 600;
+      font-size: 14px;
+    }
+    .step-title { font-size: 18px; font-weight: 600; }
+
+    label { display: block; margin-bottom: 6px; color: #8b949e; font-size: 14px; }
+    input[type="text"], textarea {
+      width: 100%;
+      padding: 10px 12px;
+      background: #0d1117;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      color: #c9d1d9;
+      font-size: 14px;
+      font-family: inherit;
+    }
+    input:focus, textarea:focus {
+      outline: none;
+      border-color: #58a6ff;
+    }
+    textarea {
+      font-family: 'SF Mono', Consolas, monospace;
+      font-size: 13px;
+      resize: vertical;
+    }
+
+    .row { display: flex; gap: 12px; align-items: flex-end; }
+    .row > * { flex: 1; }
+    .row > button { flex: none; }
+
+    button {
+      padding: 10px 20px;
+      border: none;
+      border-radius: 6px;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .btn-primary {
+      background: #238636;
+      color: white;
+    }
+    .btn-primary:hover { background: #2ea043; }
+    .btn-primary:disabled {
+      background: #21262d;
+      color: #484f58;
+      cursor: not-allowed;
+    }
+    .btn-secondary {
+      background: #21262d;
+      color: #c9d1d9;
+      border: 1px solid #30363d;
+    }
+    .btn-secondary:hover { background: #30363d; }
+
+    .output {
+      background: #0d1117;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      padding: 12px;
+      font-family: 'SF Mono', Consolas, monospace;
+      font-size: 12px;
+      white-space: pre-wrap;
+      max-height: 400px;
+      overflow-y: auto;
+      margin-top: 12px;
+    }
+    .output.success { border-color: #238636; }
+    .output.error { border-color: #f85149; }
+
+    .checkbox-row {
+      display: flex;
+      gap: 16px;
+      margin-top: 12px;
+    }
+    .checkbox-row label {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin: 0;
+      cursor: pointer;
+      color: #c9d1d9;
+    }
+    input[type="checkbox"] {
+      width: 16px;
+      height: 16px;
+      accent-color: #238636;
+    }
+
+    .spinner {
+      display: inline-block;
+      width: 14px;
+      height: 14px;
+      border: 2px solid #30363d;
+      border-top-color: #58a6ff;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin-right: 8px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .hidden { display: none; }
+
+    .json-error {
+      color: #f85149;
+      font-size: 12px;
+      margin-top: 4px;
+    }
+
+    .config-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 6px;
+    }
+    .config-header label { margin: 0; }
+    .site-id-input {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+    .site-id-input input {
+      width: 200px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Docpull</h1>
+  <p class="subtitle">Add a new documentation site to scrape</p>
+
+  <!-- Step 1: Discover -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-number">1</div>
+      <div class="step-title">Discover Site</div>
+    </div>
+    <div class="row">
+      <div>
+        <label for="url">Documentation URL</label>
+        <input type="text" id="url" placeholder="https://docs.example.com/getting-started">
+      </div>
+      <button class="btn-primary" id="discoverBtn" onclick="discover()">Discover</button>
+    </div>
+    <div id="discoverOutput" class="output hidden"></div>
+  </div>
+
+  <!-- Step 2: Edit Config -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-number">2</div>
+      <div class="step-title">Edit Configuration</div>
+    </div>
+    <div class="config-header">
+      <div class="site-id-input">
+        <label for="siteId">Site ID:</label>
+        <input type="text" id="siteId" placeholder="my-site">
+      </div>
+      <button class="btn-secondary" onclick="formatJson()">Format JSON</button>
+    </div>
+    <textarea id="configEditor" rows="20" placeholder="Paste or edit JSON configuration here..."></textarea>
+    <div id="jsonError" class="json-error hidden"></div>
+    <div style="margin-top: 12px;">
+      <button class="btn-primary" id="saveConfigBtn" onclick="saveConfig()">Save to sites.json</button>
+    </div>
+    <div id="saveOutput" class="output hidden"></div>
+  </div>
+
+  <!-- Step 3: Fetch Links -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-number">3</div>
+      <div class="step-title">Fetch Links</div>
+    </div>
+    <p style="color: #8b949e; margin-bottom: 12px;">
+      Wait a few seconds after saving for the Modal server to reload, then fetch links.
+    </p>
+    <div class="row">
+      <div>
+        <label for="linksSiteId">Site ID</label>
+        <input type="text" id="linksSiteId" placeholder="my-site">
+      </div>
+      <button class="btn-primary" id="linksBtn" onclick="fetchLinks()">Fetch Links</button>
+    </div>
+    <div class="checkbox-row">
+      <label><input type="checkbox" id="saveLinks" checked> Save to file (--save)</label>
+      <label><input type="checkbox" id="forceLinks"> Force refresh (--force)</label>
+    </div>
+    <div id="linksOutput" class="output hidden"></div>
+  </div>
+
+  <script>
+    const API = 'http://127.0.0.1:8080/api';
+
+    function showOutput(el, text, success = true) {
+      el.textContent = text;
+      el.classList.remove('hidden', 'success', 'error');
+      el.classList.add(success ? 'success' : 'error');
+    }
+
+    function setLoading(btn, loading) {
+      if (loading) {
+        btn.disabled = true;
+        btn.dataset.originalText = btn.textContent;
+        btn.innerHTML = '<span class="spinner"></span>Running...';
+      } else {
+        btn.disabled = false;
+        btn.textContent = btn.dataset.originalText;
+      }
+    }
+
+    async function discover() {
+      const url = document.getElementById('url').value.trim();
+      if (!url) return alert('Please enter a URL');
+
+      const btn = document.getElementById('discoverBtn');
+      const output = document.getElementById('discoverOutput');
+
+      setLoading(btn, true);
+      output.classList.add('hidden');
+
+      try {
+        const res = await fetch(`${API}/discover`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url })
+        });
+        const data = await res.json();
+
+        showOutput(output, data.stdout || data.stderr, data.success);
+
+        // Try to extract suggested config from output
+        const configMatch = data.stdout?.match(/SUGGESTED CONFIGURATION:[\s\S]*?\n"([^"]+)":\s*(\{[\s\S]*?\n\})\n/);
+        if (configMatch) {
+          const suggestedId = configMatch[1];
+          let configJson = configMatch[2];
+
+          // Clean up comments
+          configJson = configJson.replace(/\s*#[^\n]*/g, '');
+
+          try {
+            const config = JSON.parse(configJson);
+            document.getElementById('siteId').value = suggestedId;
+            document.getElementById('configEditor').value = JSON.stringify(config, null, 2);
+            document.getElementById('linksSiteId').value = suggestedId;
+          } catch (e) {
+            // Couldn't parse, user can copy manually
+          }
+        }
+      } catch (err) {
+        showOutput(output, `Error: ${err.message}`, false);
+      }
+
+      setLoading(btn, false);
+    }
+
+    function formatJson() {
+      const editor = document.getElementById('configEditor');
+      const errorEl = document.getElementById('jsonError');
+
+      try {
+        const parsed = JSON.parse(editor.value);
+        editor.value = JSON.stringify(parsed, null, 2);
+        errorEl.classList.add('hidden');
+      } catch (e) {
+        errorEl.textContent = `Invalid JSON: ${e.message}`;
+        errorEl.classList.remove('hidden');
+      }
+    }
+
+    async function saveConfig() {
+      const siteId = document.getElementById('siteId').value.trim();
+      const configText = document.getElementById('configEditor').value.trim();
+      const errorEl = document.getElementById('jsonError');
+      const output = document.getElementById('saveOutput');
+      const btn = document.getElementById('saveConfigBtn');
+
+      if (!siteId) return alert('Please enter a site ID');
+      if (!configText) return alert('Please enter a configuration');
+
+      let config;
+      try {
+        config = JSON.parse(configText);
+        errorEl.classList.add('hidden');
+      } catch (e) {
+        errorEl.textContent = `Invalid JSON: ${e.message}`;
+        errorEl.classList.remove('hidden');
+        return;
+      }
+
+      setLoading(btn, true);
+      output.classList.add('hidden');
+
+      try {
+        const res = await fetch(`${API}/add-site`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ site_id: siteId, config })
+        });
+        const data = await res.json();
+        showOutput(output, data.message || JSON.stringify(data), data.success);
+
+        // Update the links site ID
+        document.getElementById('linksSiteId').value = siteId;
+      } catch (err) {
+        showOutput(output, `Error: ${err.message}`, false);
+      }
+
+      setLoading(btn, false);
+    }
+
+    async function fetchLinks() {
+      const siteId = document.getElementById('linksSiteId').value.trim();
+      if (!siteId) return alert('Please enter a site ID');
+
+      const save = document.getElementById('saveLinks').checked;
+      const force = document.getElementById('forceLinks').checked;
+      const btn = document.getElementById('linksBtn');
+      const output = document.getElementById('linksOutput');
+
+      setLoading(btn, true);
+      output.classList.add('hidden');
+
+      try {
+        const res = await fetch(`${API}/links`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ site_id: siteId, save, force })
+        });
+        const data = await res.json();
+        showOutput(output, data.stdout || data.stderr, data.success);
+      } catch (err) {
+        showOutput(output, `Error: ${err.message}`, false);
+      }
+
+      setLoading(btn, false);
+    }
+
+    // Validate JSON on input
+    document.getElementById('configEditor').addEventListener('input', () => {
+      const errorEl = document.getElementById('jsonError');
+      const text = document.getElementById('configEditor').value.trim();
+      if (!text) {
+        errorEl.classList.add('hidden');
+        return;
+      }
+      try {
+        JSON.parse(text);
+        errorEl.classList.add('hidden');
+      } catch (e) {
+        errorEl.textContent = `Invalid JSON: ${e.message}`;
+        errorEl.classList.remove('hidden');
+      }
+    });
+  </script>
+</body>
+</html>
