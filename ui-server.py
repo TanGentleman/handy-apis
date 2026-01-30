@@ -175,7 +175,19 @@ async def scrape_content(req: ContentRequest):
         data = json.loads(SITES_JSON.read_text())
         site_config = data.get("sites", {}).get(req.site_id)
         if site_config and not site_config.get("testPath"):
-            site_config["testPath"] = req.path
+            # Insert testPath in the right position (after baseUrl/defaultPath, before mode)
+            key_order = ["name", "baseUrl", "defaultPath", "testPath", "mode", "extractor", "links", "content"]
+            new_config = {}
+            for key in key_order:
+                if key == "testPath":
+                    new_config["testPath"] = req.path
+                elif key in site_config:
+                    new_config[key] = site_config[key]
+            # Add any remaining keys not in the standard order
+            for key in site_config:
+                if key not in new_config:
+                    new_config[key] = site_config[key]
+            data["sites"][req.site_id] = new_config
             SITES_JSON.write_text(json.dumps(data, indent=2))
             test_path_updated = True
 
