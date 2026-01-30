@@ -80,6 +80,11 @@ class LinksRequest(BaseModel):
     force: bool = False
 
 
+class ContentRequest(BaseModel):
+    site_id: str
+    path: str
+
+
 def run_command(cmd: list[str], timeout: int = 120) -> dict:
     """Run a CLI command and return stdout/stderr."""
     try:
@@ -155,6 +160,26 @@ async def get_links(req: LinksRequest):
         cmd.append("--force")
 
     result = run_command(cmd, timeout=120)
+    return result
+
+
+@app.post("/api/content")
+async def scrape_content(req: ContentRequest):
+    """Run docpull content for a site and path. Updates testPath if successful and not set."""
+    cmd = ["python", "docpull.py", "content", req.site_id, req.path]
+    result = run_command(cmd, timeout=120)
+
+    # If successful and testPath not set, update sites.json
+    test_path_updated = False
+    if result["success"] and SITES_JSON.exists():
+        data = json.loads(SITES_JSON.read_text())
+        site_config = data.get("sites", {}).get(req.site_id)
+        if site_config and not site_config.get("testPath"):
+            site_config["testPath"] = req.path
+            SITES_JSON.write_text(json.dumps(data, indent=2))
+            test_path_updated = True
+
+    result["test_path_updated"] = test_path_updated
     return result
 
 

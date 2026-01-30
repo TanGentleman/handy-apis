@@ -230,6 +230,29 @@
     <div id="linksOutput" class="output hidden"></div>
   </div>
 
+  <!-- Step 4: Scrape Content -->
+  <div class="step">
+    <div class="step-header">
+      <div class="step-number">4</div>
+      <div class="step-title">Scrape Content</div>
+    </div>
+    <p style="color: #8b949e; margin-bottom: 12px;">
+      Test content extraction on a specific page. If successful, this will set the testPath for the site.
+    </p>
+    <div class="row">
+      <div style="flex: 1;">
+        <label for="contentSiteId">Site ID</label>
+        <input type="text" id="contentSiteId" placeholder="my-site">
+      </div>
+      <div style="flex: 2;">
+        <label for="contentPath">Path (from links above)</label>
+        <input type="text" id="contentPath" placeholder="/getting-started">
+      </div>
+      <button class="btn-primary" id="contentBtn" onclick="scrapeContent()">Scrape</button>
+    </div>
+    <div id="contentOutput" class="output hidden"></div>
+  </div>
+
   <script>
     const API = 'http://127.0.0.1:8080/api';
 
@@ -284,6 +307,7 @@
             document.getElementById('siteId').value = suggestedId;
             document.getElementById('configEditor').value = JSON.stringify(config, null, 2);
             document.getElementById('linksSiteId').value = suggestedId;
+            document.getElementById('contentSiteId').value = suggestedId;
           } catch (e) {
             // Couldn't parse, user can copy manually
           }
@@ -341,8 +365,9 @@
         const data = await res.json();
         showOutput(output, data.message || JSON.stringify(data), data.success);
 
-        // Update the links site ID
+        // Update the links and content site IDs
         document.getElementById('linksSiteId').value = siteId;
+        document.getElementById('contentSiteId').value = siteId;
       } catch (err) {
         showOutput(output, `Error: ${err.message}`, false);
       }
@@ -370,6 +395,38 @@
         });
         const data = await res.json();
         showOutput(output, data.stdout || data.stderr, data.success);
+      } catch (err) {
+        showOutput(output, `Error: ${err.message}`, false);
+      }
+
+      setLoading(btn, false);
+    }
+
+    async function scrapeContent() {
+      const siteId = document.getElementById('contentSiteId').value.trim();
+      const path = document.getElementById('contentPath').value.trim();
+      if (!siteId) return alert('Please enter a site ID');
+      if (!path) return alert('Please enter a path to scrape');
+
+      const btn = document.getElementById('contentBtn');
+      const output = document.getElementById('contentOutput');
+
+      setLoading(btn, true);
+      output.classList.add('hidden');
+
+      try {
+        const res = await fetch(`${API}/content`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ site_id: siteId, path })
+        });
+        const data = await res.json();
+
+        let outputText = data.stdout || data.stderr;
+        if (data.success && data.test_path_updated) {
+          outputText += `\n\n✓ Updated testPath to "${path}" in sites.json`;
+        }
+        showOutput(output, outputText, data.success);
       } catch (err) {
         showOutput(output, `Error: ${err.message}`, false);
       }
