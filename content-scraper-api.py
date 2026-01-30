@@ -42,7 +42,7 @@ cache = modal.Dict.from_name("scraper-cache", create_if_missing=True)
 # Modal Dict for tracking failed links
 error_tracker = modal.Dict.from_name("scraper-errors", create_if_missing=True)
 
-DEFAULT_MAX_AGE = 3600 * 48  # 48 hours
+DEFAULT_MAX_AGE = 3600 * 24 * 7  # 7 days
 ERROR_THRESHOLD = 3  # Skip links that have failed this many times
 ERROR_EXPIRY = 86400  # 24 hours - errors auto-expire
 
@@ -866,7 +866,7 @@ async def root():
         },
         "features": [
             "Links caching (when >1 link)",
-            "Content caching (48 hour default)",
+            "Content caching (7 day default)",
             "Error tracking (skip after 3 failures, auto-expire 24h, force clears)",
             "Parallel bulk indexing (50 concurrent)",
             "ZIP download with folder structure",
@@ -1619,6 +1619,25 @@ async def export_urls_as_zip(request: ExportRequest):
             "X-Export-Error": str(error_count + len(unknown_urls)),
         }
     )
+
+
+@app.function(schedule=modal.Period(days=6))
+def refresh_cache():
+    """Refresh cache entries to prevent Modal Dict expiration.
+
+    Modal Dict entries expire after 7 days of inactivity (no reads or writes).
+    This cron job runs every 6 days and reads all cache entries to keep them alive.
+    """
+    keys = list(cache.keys())
+    refreshed = 0
+    for key in keys:
+        try:
+            _ = cache[key]  # Read to prevent expiration
+            refreshed += 1
+        except KeyError:
+            pass
+    print(f"[refresh_cache] Refreshed {refreshed}/{len(keys)} cache entries")
+    return {"refreshed": refreshed, "total_keys": len(keys)}
 
 
 @app.function()
