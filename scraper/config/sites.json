@@ -305,6 +305,25 @@
         "selector": "main",
         "method": "inner_html"
       }
+    },
+    "together": {
+      "name": "Together AI",
+      "baseUrl": "https://docs.together.ai/docs",
+      "testPath": "/text-to-speech",
+      "mode": "fetch",
+      "links": {
+        "startUrls": [
+          ""
+        ],
+        "pattern": "/docs",
+        "maxDepth": 2
+      },
+      "content": {
+        "mode": "browser",
+        "waitFor": "//button[@aria-label='Copy page']",
+        "selector": "//button[@aria-label='Copy page']",
+        "method": "click_copy"
+      }
     }
   }
 }
