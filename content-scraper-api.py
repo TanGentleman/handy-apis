@@ -53,7 +53,7 @@ cache = modal.Dict.from_name("scraper-cache", create_if_missing=True)
 # Modal Dict for tracking failed links
 error_tracker = modal.Dict.from_name("scraper-errors", create_if_missing=True)
 
-DEFAULT_MAX_AGE = 3600 * 48  # 48 hours
+DEFAULT_MAX_AGE = 3600 * 24 * 7  # 7 days
 ERROR_THRESHOLD = 3  # Skip links that have failed this many times
 ERROR_EXPIRY = 86400  # 24 hours - errors auto-expire
 
@@ -154,6 +154,12 @@ class ExportRequest(BaseModel):
     cached_only: bool = True
     max_age: int = DEFAULT_MAX_AGE
     include_manifest: bool = True
+
+
+class BulkScrapeRequest(BaseModel):
+    """Request body for bulk scrape jobs."""
+    urls: list[str]
+    max_age: int = DEFAULT_MAX_AGE
 
 
 # --- Helper functions ---
@@ -949,7 +955,7 @@ async def root():
         },
         "features": [
             "Links caching (when >1 link)",
-            "Content caching (48 hour default)",
+            "Content caching (7-day default)",
             "Error tracking (skip after 3 failures, auto-expire 24h, force clears)",
             "Parallel bulk indexing (50 concurrent)",
             "ZIP download with folder structure",
@@ -1711,12 +1717,6 @@ async def export_urls_as_zip(request: ExportRequest):
 
 
 # --- Bulk Job Endpoints ---
-class BulkScrapeRequest(BaseModel):
-    """Request body for bulk scrape jobs."""
-    urls: list[str]
-    max_age: int = DEFAULT_MAX_AGE
-
-
 @web_app.post("/jobs/bulk")
 async def submit_bulk_job(request: BulkScrapeRequest):
     """Submit a bulk scrape job (fire-and-forget).
