@@ -301,7 +301,8 @@
         "waitFor": "main",
         "selector": "main",
         "method": "inner_html"
-      }
+      },
+      "testPath": "/getting-started/quickstart"
     }
   }
 }
