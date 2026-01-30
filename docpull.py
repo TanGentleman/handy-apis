@@ -344,10 +344,13 @@ def index(
 
     cached = data.get("cached", 0)
     scraped = data.get("scraped", 0)
+    skipped = data.get("skipped_assets", 0)
     print(
         f"\nTotal: {data['total']} pages | Cached: {cached} | Scraped: {scraped}",
         file=sys.stderr,
     )
+    if skipped:
+        print(f"Skipped: {skipped} assets (PDFs, images, feeds)", file=sys.stderr)
     print(
         f"Success: {data['successful']} | Failed: {data['failed']}",
         file=sys.stderr,

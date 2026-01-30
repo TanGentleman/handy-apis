@@ -19,16 +19,15 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from scraper.bulk import (
-    ASSET_EXTENSIONS,
     DEFAULT_DELAY_MS,
     USER_AGENT,
     JobStatus,
     calculate_batches,
     create_job,
-    is_asset_url,
     jobs,
     update_job_progress,
 )
+from scraper.urls import clean_url, is_asset_url, normalize_path, normalize_url
 
 # Modal image with Playwright
 playwright_image = (
@@ -194,51 +193,6 @@ def extract_page_content(page, content_cfg: ContentConfig) -> str:
         element = page.query_selector(content_cfg.selector)
         raw_html = element.inner_html() if element else ""
         return html_to_markdown(raw_html)
-
-
-def clean_url(url: str) -> str:
-    """Remove query params and fragments from URL."""
-    return url.split("?")[0].split("#")[0].rstrip("/")
-
-
-def normalize_url(url: str) -> str:
-    """Normalize URL for consistent matching.
-
-    - Lowercase scheme and host
-    - Remove query/fragment
-    - Collapse duplicate slashes in path
-    - Remove trailing slash (always, for consistent prefix matching)
-    """
-    url = url.strip()
-    p = urlparse(url)
-
-    scheme = (p.scheme or "https").lower()
-    netloc = (p.netloc or "").lower()
-
-    # Normalize path - keep empty for root, always strip trailing slash
-    path = p.path or ""
-    path = re.sub(r"/{2,}", "/", path)  # collapse //
-    path = path.rstrip("/")  # always remove trailing slash
-
-    return urlunparse((scheme, netloc, path, "", "", ""))
-
-
-def normalize_path(path: str) -> str:
-    """Normalize a URL path for cache keys.
-
-    - Empty string for base page
-    - Always starts with / otherwise
-    - No trailing slash
-    - No duplicate slashes
-    """
-    if not path:
-        return ""
-    path = re.sub(r"/{2,}", "/", path)
-    if not path.startswith("/"):
-        path = "/" + path
-    if path != "/" and path.endswith("/"):
-        path = path[:-1]
-    return "" if path == "/" else path
 
 
 def get_site_resolver() -> dict:
@@ -1314,16 +1268,20 @@ async def index_site(
     links = links_response.links
     base_url = config.baseUrl
 
-    # Extract paths from links
+    # Extract paths from links, filtering out assets
     paths = []
+    skipped_assets = 0
     for link in links:
+        # Skip asset URLs (PDFs, images, feeds, etc.)
+        if is_asset_url(link):
+            skipped_assets += 1
+            continue
+
         if link.startswith(base_url):
-            path = link[len(base_url) :]
+            path = link[len(base_url):]
             paths.append(path)
         else:
             # Handle links with different scheme or www
-            from urllib.parse import urlparse
-
             link_parsed = urlparse(link)
             base_parsed = urlparse(base_url)
             if link_parsed.netloc == base_parsed.netloc:
@@ -1375,6 +1333,7 @@ async def index_site(
     return {
         "site_id": site_id,
         "total": len(paths),
+        "skipped_assets": skipped_assets,
         "cached": cached_count,
         "scraped": len(paths_to_scrape),
         "successful": successful,

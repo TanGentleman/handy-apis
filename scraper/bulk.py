@@ -4,10 +4,10 @@ import math
 import time
 import uuid
 from enum import Enum
-from pathlib import PurePosixPath
-from urllib.parse import unquote, urlparse
 
 import modal
+
+from scraper.urls import is_asset_url  # noqa: F401 - re-exported for backwards compat
 
 # Shared Modal Dicts (same names as main API for interop)
 jobs = modal.Dict.from_name("scrape-jobs", create_if_missing=True)
@@ -17,25 +17,11 @@ MAX_CONTAINERS = 100
 DEFAULT_DELAY_MS = 1000
 USER_AGENT = "DocPull/1.0 (+https://github.com/TanGentleman/docpull)"
 
-ASSET_EXTENSIONS = frozenset({
-    ".pdf", ".zip", ".tar", ".gz", ".tgz", ".rar", ".7z",
-    ".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico", ".webp",
-    ".mp4", ".mp3", ".wav", ".webm", ".mov",
-    ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
-    ".exe", ".dmg", ".pkg", ".deb", ".rpm",
-})
-
 
 class JobStatus(str, Enum):
     PENDING = "pending"
     IN_PROGRESS = "in_progress"
     COMPLETED = "completed"
-
-
-def is_asset_url(url: str) -> bool:
-    """Check if URL points to a binary asset."""
-    path = unquote(urlparse(url).path)
-    return PurePosixPath(path).suffix.lower() in ASSET_EXTENSIONS
 
 
 def create_job(urls: list[str], by_site: dict, assets: list, unknown: list) -> str:
