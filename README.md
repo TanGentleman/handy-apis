@@ -16,11 +16,12 @@ pip install -r requirements.txt
 MODAL_KEY=wk-...
 MODAL_SECRET=ws-...
 
-# Deploy and serve the API
+# Terminal 1: Deploy the API with hot-reload server
 modal serve content-scraper-api.py
 
-# Deploy and serve the UI (in another terminal)
-modal serve ui/app.py
+# Terminal 2: Configure and serve the UI
+python ui/setup.py          # Run once to configure API URL
+modal serve ui/app.py        # Then start the UI
 ```
 
 ## Usage

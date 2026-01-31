@@ -4,12 +4,29 @@ Web interface for managing documentation scraping.
 
 ## Deploy
 
+**First time setup:**
+
 ```bash
-# Make sure Modal credentials are set up (see main README)
+# Terminal 1: Start the API first
+modal serve content-scraper-api.py
+
+# Terminal 2: Configure the UI (one-time setup)
+python ui/setup.py
+# Copy the API URL from Terminal 1 when prompted
+
+# Then start the UI
+modal serve ui/app.py
+```
+
+**After initial setup:**
+
+```bash
 modal serve ui/app.py
 ```
 
 Open the URL shown in the terminal to access the web interface.
+
+> **Note:** If you get an ImportError about missing config, run `python ui/setup.py` to configure the API URL.
 
 ## Features
 
