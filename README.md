@@ -9,7 +9,7 @@ Modal-based documentation scraper. Fetches docs from various sites and saves loc
 uv sync
 
 # Or (preferably in a virtual environment):
-pip install modal httpx
+pip install -r requirements.txt
 ```
 
 # Set up Modal credentials (create .env file)
