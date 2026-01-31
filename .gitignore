@@ -3,3 +3,4 @@ __pycache__/
 .env
 .venv/
 convex-backend/convex/_generated/
+ui/config.py
