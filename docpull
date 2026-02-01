@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Wrapper script for docpull CLI
+# Automatically uses the project's virtual environment
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Prefer uv run if available, otherwise use venv directly
+if command -v uv &> /dev/null; then
+    exec uv run --project "$SCRIPT_DIR" python -m cli.main "$@"
+else
+    source "$SCRIPT_DIR/.venv/bin/activate"
+    exec python -m cli.main "$@"
+fi

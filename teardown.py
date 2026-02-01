@@ -3,6 +3,7 @@
 
 import argparse
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -13,6 +14,25 @@ DOCPULL_APP_NAMES = {"content-scraper-api", "docpull"}
 # Valid states for apps we can stop
 RUNNING_STATES = {"deployed", "ephemeral"}
 
+# Delimiters for managed zshrc section (must match deploy.py)
+ALIAS_START = "# >>> docpull alias >>>"
+ALIAS_END = "# <<< docpull alias <<<"
+
+
+def get_modal_command():
+    """Get the appropriate modal command prefix.
+
+    Returns:
+        list: Command prefix for running modal
+    """
+    # Check if uv is available - if so, use uv run modal
+    uv_check = subprocess.run(["uv", "--version"], capture_output=True)
+    if uv_check.returncode == 0:
+        return ["uv", "run", "modal"]
+    else:
+        # Use python -m modal when not using uv
+        return [sys.executable, "-m", "modal"]
+
 
 def get_deployed_apps():
     """Get list of deployed Modal apps.
@@ -21,8 +41,9 @@ def get_deployed_apps():
         list: List of app dictionaries from modal app list --json
     """
     print("\n📋 Fetching deployed apps...")
+    modal_cmd = get_modal_command()
     result = subprocess.run(
-        ["modal", "app", "list", "--json"],
+        modal_cmd + ["app", "list", "--json"],
         capture_output=True,
         text=True
     )
@@ -67,8 +88,9 @@ def stop_app(app_id, description):
         bool: True if stop succeeded
     """
     print(f"\n🛑 Stopping {description} ({app_id})...")
+    modal_cmd = get_modal_command()
     result = subprocess.run(
-        ["modal", "app", "stop", app_id],
+        modal_cmd + ["app", "stop", app_id],
         capture_output=True,
         text=True
     )
@@ -93,6 +115,36 @@ def cleanup_config():
             print(f"✅ Removed {config_path}")
         except OSError as e:
             print(f"⚠️  Could not remove {config_path}: {e}")
+
+
+def remove_global_alias():
+    """Remove global docpull alias from zshrc.
+
+    Returns:
+        bool: True if alias was removed, False otherwise
+    """
+    zshrc_path = Path.home() / ".zshrc"
+
+    if not zshrc_path.exists():
+        return False
+
+    content = zshrc_path.read_text()
+    if ALIAS_START not in content:
+        return False
+
+    print("\n🧹 Removing global docpull alias from ~/.zshrc...")
+
+    # Remove the alias block using regex
+    pattern = rf"\n?{re.escape(ALIAS_START)}.*?{re.escape(ALIAS_END)}\n?"
+    new_content = re.sub(pattern, "\n", content, flags=re.DOTALL)
+
+    try:
+        zshrc_path.write_text(new_content)
+        print("✅ Removed docpull alias from ~/.zshrc")
+        return True
+    except OSError as e:
+        print(f"⚠️  Could not remove alias from ~/.zshrc: {e}")
+        return False
 
 
 def display_summary(stopped_apps, failed_apps):
@@ -166,7 +218,11 @@ def main():
         if stopped_apps:
             cleanup_config()
 
-        # Step 5: Display summary
+        # Step 5: Remove global alias (interactive prompt)
+        if not json_mode:
+            remove_global_alias()
+
+        # Step 6: Display summary
         if json_mode:
             result = {
                 "status": "success" if not failed_apps else "partial",
