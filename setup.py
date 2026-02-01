@@ -54,6 +54,33 @@ def install_requirements():
     print("✅ Dependencies installed")
 
 
+def get_existing_apps():
+    """Get list of existing Modal apps.
+
+    Returns:
+        dict: Map of app description to app ID for deployed apps
+    """
+    result = subprocess.run(
+        ["modal", "app", "list", "--json"],
+        capture_output=True,
+        text=True
+    )
+
+    if result.returncode != 0:
+        # Modal CLI not set up or error - not fatal, just return empty
+        return {}
+
+    try:
+        apps = json.loads(result.stdout)
+        return {
+            app["Description"]: app["App ID"]
+            for app in apps
+            if app["State"] == "deployed"
+        }
+    except (json.JSONDecodeError, KeyError):
+        return {}
+
+
 def deploy_api():
     """Deploy Modal API and extract URL.
 
@@ -67,6 +94,11 @@ def deploy_api():
         print(f"❌ Error: {api_path} not found")
         sys.exit(1)
 
+    # Check for existing deployment
+    existing_apps = get_existing_apps()
+    if "content-scraper-api" in existing_apps:
+        print(f"⚠️  Note: Redeploying existing app (ID: {existing_apps['content-scraper-api']})")
+
     result = subprocess.run(
         [sys.executable, "-m", "modal", "deploy", str(api_path)],
         capture_output=True,
@@ -79,17 +111,19 @@ def deploy_api():
         sys.exit(1)
 
     # Extract API URL from deployment output
-    # Looking for pattern: https://[username]--content-scraper-api-[hash].modal.run
-    url_pattern = r'(https://[^/]+--content-scraper-api[^/\s]+\.modal\.run)'
+    # Looking for the web function URL in the deploy output
+    # Example: https://tangentleman--content-scraper-api-fastapi-app.modal.run
+    url_pattern = r'https://[^\s]+--content-scraper-api[^\s]+\.modal\.run'
     match = re.search(url_pattern, result.stdout)
 
     if not match:
         print("❌ Error: Could not extract API URL from deployment output")
         print("\nDeployment output:")
         print(result.stdout)
+        print("\nSearching for URL pattern:", url_pattern)
         sys.exit(1)
 
-    api_url = match.group(1)
+    api_url = match.group(0)
     print(f"✅ API deployed: {api_url}")
     return api_url
 
@@ -109,8 +143,12 @@ SCRAPER_API_URL = "{api_url}"
 IS_PROD = False
 '''
 
-    config_path.write_text(config_content)
-    print(f"✅ Configuration saved to {config_path}")
+    try:
+        config_path.write_text(config_content)
+        print(f"✅ Configuration saved to {config_path}")
+    except OSError as e:
+        print(f"❌ Error saving configuration: {e}")
+        sys.exit(1)
 
 
 def deploy_ui():
@@ -126,6 +164,11 @@ def deploy_ui():
         print(f"❌ Error: {ui_path} not found")
         sys.exit(1)
 
+    # Check for existing deployment
+    existing_apps = get_existing_apps()
+    if "docpull" in existing_apps:
+        print(f"⚠️  Note: Redeploying existing app (ID: {existing_apps['docpull']})")
+
     result = subprocess.run(
         [sys.executable, "-m", "modal", "deploy", str(ui_path)],
         capture_output=True,
@@ -138,17 +181,19 @@ def deploy_ui():
         sys.exit(1)
 
     # Extract UI URL from deployment output
-    # Looking for pattern: https://[username]--docpull-[hash].modal.run
-    url_pattern = r'(https://[^/]+--docpull[^/\s]+\.modal\.run)'
+    # Looking for the web function URL
+    # Example: https://tangentleman--docpull-web.modal.run
+    url_pattern = r'https://[^\s]+--docpull[^\s]+\.modal\.run'
     match = re.search(url_pattern, result.stdout)
 
     if not match:
         print("❌ Error: Could not extract UI URL from deployment output")
         print("\nDeployment output:")
         print(result.stdout)
+        print("\nSearching for URL pattern:", url_pattern)
         sys.exit(1)
 
-    ui_url = match.group(1)
+    ui_url = match.group(0)
     print(f"✅ UI deployed: {ui_url}")
     return ui_url
 
@@ -170,6 +215,8 @@ def display_summary(api_url, ui_url, open_browser=False):
     print("  - Test the API: curl " + api_url)
     print("  - Visit the UI in your browser")
     print("  - Use the CLI: python cli/main.py sites")
+    print("\n🛑 To stop deployments:")
+    print("  python teardown.py")
     print("=" * 60)
 
     if open_browser:
@@ -180,7 +227,16 @@ def display_summary(api_url, ui_url, open_browser=False):
 def main():
     """Run the deployment process."""
     # Parse command line arguments
-    parser = argparse.ArgumentParser(description="Deploy docpull to Modal")
+    parser = argparse.ArgumentParser(
+        description="Deploy docpull to Modal",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  python setup.py                    # Standard deployment
+  python setup.py --open-browser     # Deploy and open UI
+  python setup.py --json             # Output as JSON
+        """
+    )
     parser.add_argument(
         "--json",
         action="store_true",
@@ -191,10 +247,16 @@ def main():
         action="store_true",
         help="Open the deployed UI in your browser after deployment",
     )
+    parser.add_argument(
+        "--skip-install",
+        action="store_true",
+        help="Skip dependency installation (assumes already installed)",
+    )
     args = parser.parse_args()
 
     json_mode = args.json
     open_browser = args.open_browser
+    skip_install = args.skip_install
 
     if not json_mode:
         print("🔧 Docpull Deployment Setup")
@@ -204,8 +266,11 @@ def main():
         # Step 1: Check virtual environment
         check_venv()
 
-        # Step 2: Install dependencies
-        install_requirements()
+        # Step 2: Install dependencies (optional skip)
+        if not skip_install:
+            install_requirements()
+        elif not json_mode:
+            print("\n⏭️  Skipping dependency installation")
 
         # Step 3: Deploy API
         api_url = deploy_api()
@@ -228,11 +293,21 @@ def main():
         else:
             display_summary(api_url, ui_url, open_browser=open_browser)
 
+    except KeyboardInterrupt:
+        print("\n\n⚠️  Deployment cancelled by user")
+        sys.exit(130)
     except SystemExit as e:
         if json_mode and e.code != 0:
             result = {"status": "error", "error": "Deployment failed"}
             print(json.dumps(result))
         raise
+    except Exception as e:
+        if json_mode:
+            result = {"status": "error", "error": str(e)}
+            print(json.dumps(result))
+        else:
+            print(f"\n❌ Unexpected error: {e}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

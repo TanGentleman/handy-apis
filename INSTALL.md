@@ -60,14 +60,23 @@ python cli/main.py content <url> # Fetch content as markdown
 python setup.py
 ```
 
-## Uninstall
+## Teardown
+
+Stop the deployed apps:
 
 ```bash
-# List Modal deployments
-modal app list
+python teardown.py
+```
 
-# Delete apps
-modal app delete <app-name>
+**Options:**
+- `--all` — Stop ALL Modal apps (use with caution!)
+- `--json` — Output results as JSON
+
+## Full Uninstall
+
+```bash
+# Stop deployments
+python teardown.py
 
 # Remove local files
 rm -rf .venv
