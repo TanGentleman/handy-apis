@@ -44,11 +44,27 @@ def install_requirements():
         print("❌ Error: requirements.txt not found")
         sys.exit(1)
 
-    result = subprocess.run(
-        [sys.executable, "-m", "pip", "install", "-r", str(requirements_path)],
+    # Check if UV is available
+    uv_check = subprocess.run(
+        ["uv", "--version"],
         capture_output=True,
         text=True
     )
+
+    if uv_check.returncode == 0:
+        # Use UV for installation
+        result = subprocess.run(
+            ["uv", "pip", "install", "-r", str(requirements_path)],
+            capture_output=True,
+            text=True
+        )
+    else:
+        # Fallback to pip
+        result = subprocess.run(
+            [sys.executable, "-m", "pip", "install", "-r", str(requirements_path)],
+            capture_output=True,
+            text=True
+        )
 
     if result.returncode != 0:
         print("❌ Error installing dependencies:")
