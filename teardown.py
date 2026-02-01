@@ -3,6 +3,7 @@
 
 import argparse
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -12,6 +13,10 @@ DOCPULL_APP_NAMES = {"content-scraper-api", "docpull"}
 
 # Valid states for apps we can stop
 RUNNING_STATES = {"deployed", "ephemeral"}
+
+# Delimiters for managed zshrc section (must match deploy.py)
+ALIAS_START = "# >>> docpull alias >>>"
+ALIAS_END = "# <<< docpull alias <<<"
 
 
 def get_deployed_apps():
@@ -95,6 +100,46 @@ def cleanup_config():
             print(f"⚠️  Could not remove {config_path}: {e}")
 
 
+def remove_global_alias():
+    """Prompt user to remove global docpull alias from zshrc.
+
+    Returns:
+        bool: True if alias was removed, False otherwise
+    """
+    zshrc_path = Path.home() / ".zshrc"
+
+    if not zshrc_path.exists():
+        return False
+
+    content = zshrc_path.read_text()
+    if ALIAS_START not in content:
+        return False
+
+    print("\n🔧 Remove global 'docpull' command from ~/.zshrc?")
+
+    try:
+        response = input("   Remove global docpull alias? [y/N]: ").strip().lower()
+    except EOFError:
+        return False
+
+    if response != "y":
+        print("   Skipped. Alias remains in ~/.zshrc")
+        return False
+
+    # Remove the alias block using regex
+    pattern = rf"\n?{re.escape(ALIAS_START)}.*?{re.escape(ALIAS_END)}\n?"
+    new_content = re.sub(pattern, "\n", content, flags=re.DOTALL)
+
+    try:
+        zshrc_path.write_text(new_content)
+        print("   ✅ Removed from ~/.zshrc")
+        print("   Run 'source ~/.zshrc' or open a new terminal to apply")
+        return True
+    except OSError as e:
+        print(f"   ❌ Failed to update ~/.zshrc: {e}")
+        return False
+
+
 def display_summary(stopped_apps, failed_apps):
     """Display teardown summary."""
     print("\n" + "=" * 60)
@@ -166,7 +211,11 @@ def main():
         if stopped_apps:
             cleanup_config()
 
-        # Step 5: Display summary
+        # Step 5: Remove global alias (interactive prompt)
+        if not json_mode:
+            remove_global_alias()
+
+        # Step 6: Display summary
         if json_mode:
             result = {
                 "status": "success" if not failed_apps else "partial",

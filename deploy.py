@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-#!/usr/bin/env python3
 """Deploy docpull to Modal.
 
 Usage: python deploy.py [--open-browser] [--json] [--skip-install]
@@ -16,6 +15,10 @@ from pathlib import Path
 # App names for Modal deployments (must match teardown.py)
 API_APP_NAME = "content-scraper-api"
 UI_APP_NAME = "docpull"
+
+# Delimiters for managed zshrc section
+ALIAS_START = "# >>> docpull alias >>>"
+ALIAS_END = "# <<< docpull alias <<<"
 
 
 def check_venv():
@@ -233,6 +236,50 @@ def deploy_ui():
     return ui_url
 
 
+def setup_global_alias():
+    """Prompt user to add global docpull alias to zshrc.
+
+    Returns:
+        bool: True if alias was added, False otherwise
+    """
+    project_dir = Path(__file__).parent.resolve()
+    zshrc_path = Path.home() / ".zshrc"
+
+    # Check if alias already exists
+    if zshrc_path.exists():
+        content = zshrc_path.read_text()
+        if ALIAS_START in content:
+            print("\n✅ Global docpull alias already configured in ~/.zshrc")
+            return True
+
+    print("\n🔧 Setup global 'docpull' command?")
+    print(f"   This will add an alias to ~/.zshrc pointing to {project_dir}/docpull")
+
+    try:
+        response = input("   Add global docpull command? [y/N]: ").strip().lower()
+    except EOFError:
+        return False
+
+    if response != "y":
+        print("   Skipped. Use 'python -m cli.main' for local CLI access.")
+        return False
+
+    # Build the alias block
+    alias_block = f"""\n{ALIAS_START}
+alias docpull="{project_dir}/docpull"
+{ALIAS_END}\n"""
+
+    try:
+        with open(zshrc_path, "a") as f:
+            f.write(alias_block)
+        print("   ✅ Added to ~/.zshrc")
+        print("   Run 'source ~/.zshrc' or open a new terminal to use 'docpull'")
+        return True
+    except OSError as e:
+        print(f"   ❌ Failed to update ~/.zshrc: {e}")
+        return False
+
+
 def display_summary(api_url, ui_url, open_browser=False):
     """Display deployment summary.
 
@@ -249,7 +296,7 @@ def display_summary(api_url, ui_url, open_browser=False):
     print("\n📚 Next steps:")
     print("  - Test the API: curl " + api_url)
     print("  - Visit the UI in your browser")
-    print("  - Use the CLI: docpull sites")
+    print("  - Use the CLI: python -m cli.main sites")
     print("\n🛑 To stop deployments:")
     print("  python teardown.py")
     print("=" * 60)
@@ -316,7 +363,11 @@ Examples:
         # Step 5: Deploy UI
         ui_url = deploy_ui()
 
-        # Step 6: Display summary
+        # Step 6: Setup global alias (interactive prompt)
+        if not json_mode:
+            setup_global_alias()
+
+        # Step 7: Display summary
         if json_mode:
             # Output JSON for programmatic parsing
             result = {

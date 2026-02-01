@@ -13,11 +13,16 @@ uv sync
 # Authenticate with Modal (one-time)
 modal token new
 
-# Deploy to Modal
+# Deploy to Modal (will prompt to set up global 'docpull' command)
 python deploy.py
 ```
 
 ## Usage
+
+After deployment, use the CLI via one of:
+- `docpull` - if you set up the global alias during deploy
+- `./docpull` - from the project directory
+- `python -m cli.main` - direct module invocation
 
 ```bash
 # List available sites
