@@ -54,6 +54,9 @@ cache = modal.Dict.from_name("scraper-cache", create_if_missing=True)
 # Modal Dict for tracking failed links
 error_tracker = modal.Dict.from_name("scraper-errors", create_if_missing=True)
 
+# Modal Dict for dynamic site configurations (persisted, editable at runtime)
+sites_dict = modal.Dict.from_name("scraper-sites", create_if_missing=True)
+
 IS_PROD = False
 
 DEFAULT_MAX_AGE = 3600 * 24 * 7  # 7 days
@@ -121,19 +124,44 @@ def set_cached(cache_key: str, data: dict) -> None:
 
 
 # --- Load sites config ---
-def load_sites_config() -> dict[str, SiteConfig]:
-    """Load and validate sites configuration from embedded JSON file.
+def load_sites_from_file() -> dict[str, dict]:
+    """Load raw sites configuration from embedded JSON file.
 
-    Returns dict mapping site_id to validated SiteConfig.
-    Raises ValidationError if config is invalid.
+    Returns dict mapping site_id to raw config dict.
     """
     config_path = Path("/root/config/sites.json")
     if not config_path.exists():
         # Fallback to local path during development
         config_path = Path(__file__).parent.parent / "config" / "sites.json"
     with open(config_path) as f:
-        raw = json.load(f)["sites"]
-    return {site_id: SiteConfig(**cfg) for site_id, cfg in raw.items()}
+        return json.load(f)["sites"]
+
+
+def load_sites_config() -> dict[str, SiteConfig]:
+    """Load and validate sites configuration from Modal Dict (with file fallback).
+
+    Priority:
+    1. Dynamic sites from Modal Dict (added via API)
+    2. Falls back to file-based sites.json on first load
+
+    Returns dict mapping site_id to validated SiteConfig.
+    """
+    # Try loading from Modal Dict first
+    try:
+        sites_raw = sites_dict.get("_all_sites", None)
+        if sites_raw:
+            return {site_id: SiteConfig(**cfg) for site_id, cfg in sites_raw.items()}
+    except KeyError:
+        pass
+
+    # Fallback: load from file and initialize Dict
+    file_sites = load_sites_from_file()
+    try:
+        sites_dict["_all_sites"] = file_sites
+    except Exception:
+        pass  # Dict may not be writable in some contexts
+
+    return {site_id: SiteConfig(**cfg) for site_id, cfg in file_sites.items()}
 
 
 # --- Response Models ---
@@ -937,10 +965,13 @@ async def root():
     """API root with endpoint documentation."""
     return {
         "name": "Content Scraper API",
-        "version": "8.0",
+        "version": "8.1",
         "storage": "Modal Dict (7-day TTL)",
         "endpoints": {
             "/sites": "GET - List available site IDs",
+            "/sites/config": "GET - Get full sites configuration",
+            "/sites/{site_id}": "POST - Add/update a site, DELETE - Remove a site",
+            "/sites/reset": "POST - Reset sites from sites.json file",
             "/discover": "GET - Analyze a page and suggest selectors (url param)",
             "/sites/{site_id}/links": "GET - Get all doc links for a site (cached)",
             "/sites/{site_id}/content": "GET - Get content from a page (cached, max_age=0 to force)",
@@ -957,6 +988,7 @@ async def root():
             "/errors/{site_id}": "DELETE - Clear errors for a site",
         },
         "features": [
+            "Dynamic site configuration (add/update/delete sites at runtime)",
             "Links caching (when >1 link)",
             "Content caching (7-day default)",
             "Error tracking (skip after 3 failures, auto-expire 24h, force clears)",
@@ -990,6 +1022,79 @@ async def get_sites(
     else:
         sites = [{"id": site_id} for site_id, config in sites_config.items()]
     return {"sites": sites, "count": len(sites)}
+
+
+@web_app.get("/sites/config")
+async def get_sites_config_endpoint():
+    """Get full sites configuration with all metadata."""
+    sites_config = load_sites_config()
+    return {
+        "sites": {site_id: config.model_dump() for site_id, config in sites_config.items()},
+        "count": len(sites_config),
+    }
+
+
+@web_app.post("/sites/{site_id}")
+async def add_site(site_id: str, config: SiteConfig):
+    """Add or update a site configuration.
+
+    The site_id is taken from the URL path, config from request body.
+    Persists to Modal Dict for runtime availability.
+    """
+    # Load current sites
+    try:
+        current_sites = sites_dict.get("_all_sites", {})
+    except KeyError:
+        current_sites = load_sites_from_file()
+
+    # Add/update the site
+    current_sites[site_id] = config.model_dump()
+    sites_dict["_all_sites"] = current_sites
+
+    return {
+        "success": True,
+        "site_id": site_id,
+        "config": config.model_dump(),
+        "message": f"Site '{site_id}' added successfully",
+    }
+
+
+@web_app.delete("/sites/{site_id}")
+async def delete_site(site_id: str):
+    """Delete a site configuration."""
+    try:
+        current_sites = sites_dict.get("_all_sites", {})
+    except KeyError:
+        current_sites = load_sites_from_file()
+
+    if site_id not in current_sites:
+        raise HTTPException(status_code=404, detail=f"Site not found: {site_id}")
+
+    del current_sites[site_id]
+    sites_dict["_all_sites"] = current_sites
+
+    return {
+        "success": True,
+        "site_id": site_id,
+        "message": f"Site '{site_id}' deleted successfully",
+    }
+
+
+@web_app.post("/sites/reset")
+async def reset_sites():
+    """Reset all sites configuration from the embedded sites.json file.
+
+    This will overwrite any runtime changes with the file-based config.
+    """
+    file_sites = load_sites_from_file()
+    sites_dict["_all_sites"] = file_sites
+
+    return {
+        "success": True,
+        "count": len(file_sites),
+        "sites": list(file_sites.keys()),
+        "message": f"Reset to {len(file_sites)} sites from sites.json",
+    }
 
 
 @web_app.get("/discover")
@@ -1802,8 +1907,8 @@ async def list_jobs(limit: int = Query(default=20, le=100)):
                 "sites": job["input"]["sites"],
                 "progress": f"{job['progress']['completed']}/{job['input']['to_scrape']}",
             })
-        except Exception:
-            # Job was deleted or malformed
+        except KeyError:
+            # Job was deleted between keys() and get()
             continue
     return {"jobs": sorted(result, key=lambda x: x["created_at"], reverse=True)}
 

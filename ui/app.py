@@ -69,7 +69,14 @@ class ExportRequest(BaseModel):
 
 class AddSiteRequest(BaseModel):
     site_id: str
-    config: dict
+    name: str
+    baseUrl: str
+    mode: str = "fetch"
+    defaultPath: str = ""
+    testPath: str | None = None
+    extractor: str | None = None
+    links: dict = {}
+    content: dict = {}
 
 
 class LinksRequest(BaseModel):
@@ -140,6 +147,48 @@ async def serve_ui():
 async def list_sites(request: Request):
     """List configured sites."""
     return await call_scraper_api("GET", "/sites", request)
+
+
+@web_app.get("/api/sites/config")
+async def get_sites_config(request: Request):
+    """Get full sites configuration with metadata."""
+    return await call_scraper_api("GET", "/sites/config", request)
+
+
+@web_app.delete("/api/sites/{site_id}")
+async def delete_site(site_id: str, request: Request):
+    """Delete a site configuration."""
+    try:
+        result = await call_scraper_api("DELETE", f"/sites/{site_id}", request)
+        return {
+            "success": True,
+            "stdout": f"Site '{site_id}' deleted successfully!",
+            "stderr": "",
+        }
+    except HTTPException as e:
+        return {
+            "success": False,
+            "stdout": "",
+            "stderr": f"Failed to delete site: {e.detail}",
+        }
+
+
+@web_app.post("/api/sites/reset")
+async def reset_sites(request: Request):
+    """Reset all sites configuration from sites.json file."""
+    try:
+        result = await call_scraper_api("POST", "/sites/reset", request)
+        return {
+            "success": True,
+            "stdout": f"Sites config reset! Loaded {result.get('count', '?')} sites from sites.json",
+            "stderr": "",
+        }
+    except HTTPException as e:
+        return {
+            "success": False,
+            "stdout": "",
+            "stderr": f"Failed to reset sites: {e.detail}",
+        }
 
 
 @web_app.get("/api/sites/{site_id}/links")
@@ -252,12 +301,41 @@ async def discover_post(req: DiscoverRequest, request: Request):
 
 
 @web_app.post("/api/add-site")
-async def add_site(req: AddSiteRequest):
-    """Add site to config - not supported in deployed Modal UI."""
-    raise HTTPException(
-        status_code=501,
-        detail="Adding sites is not supported in deployed UI. Use local ui-server.py instead."
-    )
+async def add_site(req: AddSiteRequest, request: Request):
+    """Add site to config via API.
+
+    Proxies to the scraper API's POST /sites/{site_id} endpoint.
+    """
+    # Build the config payload (excluding site_id which goes in URL)
+    config_payload = {
+        "name": req.name,
+        "baseUrl": req.baseUrl,
+        "mode": req.mode,
+        "defaultPath": req.defaultPath,
+        "testPath": req.testPath,
+        "extractor": req.extractor,
+        "links": req.links,
+        "content": req.content,
+    }
+
+    try:
+        result = await call_scraper_api(
+            "POST",
+            f"/sites/{req.site_id}",
+            request,
+            json_body=config_payload,
+        )
+        return {
+            "success": True,
+            "stdout": f"Site '{req.site_id}' added successfully!\n\nConfig: {result.get('config', {})}",
+            "stderr": "",
+        }
+    except HTTPException as e:
+        return {
+            "success": False,
+            "stdout": "",
+            "stderr": f"Failed to add site: {e.detail}",
+        }
 
 
 @web_app.post("/api/links")
