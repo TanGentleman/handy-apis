@@ -1,12 +1,5 @@
 #!/usr/bin/env python3
-"""Interactive teardown script for docpull.
-
-Removes Modal deployments:
-1. List all deployed apps using --json
-2. Find docpull-related apps (content-scraper-api and docpull)
-3. Stop them using modal app stop
-4. Display summary
-"""
+"""Teardown script for docpull Modal deployments."""
 
 import argparse
 import json
@@ -14,12 +7,18 @@ import subprocess
 import sys
 from pathlib import Path
 
+# App names deployed by setup.py
+DOCPULL_APP_NAMES = {"content-scraper-api", "docpull"}
+
+# Valid states for apps we can stop
+RUNNING_STATES = {"deployed", "ephemeral"}
+
 
 def get_deployed_apps():
-    """Get list of deployed Modal apps as JSON.
+    """Get list of deployed Modal apps.
 
     Returns:
-        list: List of app dictionaries
+        list: List of app dictionaries from modal app list --json
     """
     print("\n📋 Fetching deployed apps...")
     result = subprocess.run(
@@ -34,46 +33,27 @@ def get_deployed_apps():
         sys.exit(1)
 
     try:
-        apps = json.loads(result.stdout)
-        return apps
+        return json.loads(result.stdout)
     except json.JSONDecodeError as e:
-        print("❌ Error parsing app list:")
-        print(str(e))
+        print(f"❌ Error parsing app list: {e}")
         sys.exit(1)
 
 
-def filter_docpull_apps(apps, stop_all=False):
+def filter_docpull_apps(apps):
     """Filter for docpull-related apps.
 
     Args:
         apps: List of app dictionaries from modal app list --json
-        stop_all: If True, return all apps regardless of description
 
     Returns:
-        list: Tuples of (app_id, description, state) for relevant apps
+        list: Tuples of (app_id, description, state) for docpull apps
     """
-    if stop_all:
-        return [
-            (app["App ID"], app["Description"], app["State"])
-            for app in apps
-            if app["State"] in ["deployed", "ephemeral"]
-        ]
-
-    # Filter for docpull-related apps that are running
-    docpull_apps = []
-    for app in apps:
-        description = app["Description"]
-        state = app["State"]
-        app_id = app["App ID"]
-
-        # Match docpull-related apps
-        if state in ["deployed", "ephemeral"] and (
-            description == "docpull" or
-            description == "content-scraper-api"
-        ):
-            docpull_apps.append((app_id, description, state))
-
-    return docpull_apps
+    return [
+        (app["App ID"], app["Description"], app["State"])
+        for app in apps
+        if app["Description"] in DOCPULL_APP_NAMES
+        and app["State"] in RUNNING_STATES
+    ]
 
 
 def stop_app(app_id, description):
@@ -84,7 +64,7 @@ def stop_app(app_id, description):
         description: The app description for display
 
     Returns:
-        bool: True if stop succeeded, False otherwise
+        bool: True if stop succeeded
     """
     print(f"\n🛑 Stopping {description} ({app_id})...")
     result = subprocess.run(
@@ -116,12 +96,7 @@ def cleanup_config():
 
 
 def display_summary(stopped_apps, failed_apps):
-    """Display teardown summary.
-
-    Args:
-        stopped_apps: List of successfully stopped app descriptions
-        failed_apps: List of failed app descriptions
-    """
+    """Display teardown summary."""
     print("\n" + "=" * 60)
     print("🎉 Teardown Complete!")
     print("=" * 60)
@@ -144,55 +119,32 @@ def display_summary(stopped_apps, failed_apps):
 
 def main():
     """Run the teardown process."""
-    # Parse command line arguments
-    parser = argparse.ArgumentParser(
-        description="Stop docpull deployments on Modal",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-  python teardown.py              # Stop docpull apps only
-  python teardown.py --all        # Stop ALL Modal apps (dangerous!)
-  python teardown.py --json       # Output results as JSON
-        """
-    )
+    parser = argparse.ArgumentParser(description="Stop docpull deployments on Modal")
     parser.add_argument(
         "--json",
         action="store_true",
-        help="Output results in JSON format (for programmatic use)",
-    )
-    parser.add_argument(
-        "--all",
-        action="store_true",
-        help="Stop ALL Modal apps (not just docpull-related). Use with caution!",
+        help="Output results in JSON format",
     )
     args = parser.parse_args()
 
     json_mode = args.json
-    stop_all = args.all
 
     if not json_mode:
         print("🔧 Docpull Teardown")
         print("=" * 60)
-        if stop_all:
-            print("⚠️  WARNING: Stopping ALL Modal apps!")
 
     try:
         # Step 1: Get deployed apps
         apps = get_deployed_apps()
 
-        # Step 2: Filter apps
-        apps_to_stop = filter_docpull_apps(apps, stop_all=stop_all)
+        # Step 2: Filter for docpull apps
+        apps_to_stop = filter_docpull_apps(apps)
 
         if not apps_to_stop:
-            if not json_mode:
-                print("💡 No apps found to stop")
+            if json_mode:
+                print(json.dumps({"status": "success", "stopped_apps": [], "failed_apps": []}))
             else:
-                result = {
-                    "status": "success",
-                    "stopped_apps": [],
-                    "failed_apps": []
-                }
-                print(json.dumps(result))
+                print("💡 No docpull apps found to stop")
             return
 
         if not json_mode:
@@ -210,8 +162,8 @@ Examples:
             else:
                 failed_apps.append(description)
 
-        # Step 4: Cleanup config (only for docpull teardown)
-        if not stop_all and stopped_apps:
+        # Step 4: Cleanup config
+        if stopped_apps:
             cleanup_config()
 
         # Step 5: Display summary
@@ -230,8 +182,7 @@ Examples:
         sys.exit(130)
     except Exception as e:
         if json_mode:
-            result = {"status": "error", "error": str(e)}
-            print(json.dumps(result))
+            print(json.dumps({"status": "error", "error": str(e)}))
         else:
             print(f"\n❌ Unexpected error: {e}")
         sys.exit(1)

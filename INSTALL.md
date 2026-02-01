@@ -69,7 +69,6 @@ python teardown.py
 ```
 
 **Options:**
-- `--all` — Stop ALL Modal apps (use with caution!)
 - `--json` — Output results as JSON
 
 ## Full Uninstall

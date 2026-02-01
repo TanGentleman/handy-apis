@@ -18,6 +18,10 @@ import sys
 import webbrowser
 from pathlib import Path
 
+# App names for Modal deployments (must match teardown.py)
+API_APP_NAME = "content-scraper-api"
+UI_APP_NAME = "docpull"
+
 
 def check_venv():
     """Verify running in a virtual environment."""
@@ -58,7 +62,7 @@ def get_existing_apps():
     """Get list of existing Modal apps.
 
     Returns:
-        dict: Map of app description to app ID for deployed apps
+        dict: Map of app description to app ID for docpull apps
     """
     result = subprocess.run(
         ["modal", "app", "list", "--json"],
@@ -67,7 +71,6 @@ def get_existing_apps():
     )
 
     if result.returncode != 0:
-        # Modal CLI not set up or error - not fatal, just return empty
         return {}
 
     try:
@@ -76,6 +79,7 @@ def get_existing_apps():
             app["Description"]: app["App ID"]
             for app in apps
             if app["State"] == "deployed"
+            and app["Description"] in {API_APP_NAME, UI_APP_NAME}
         }
     except (json.JSONDecodeError, KeyError):
         return {}
@@ -96,8 +100,8 @@ def deploy_api():
 
     # Check for existing deployment
     existing_apps = get_existing_apps()
-    if "content-scraper-api" in existing_apps:
-        print(f"⚠️  Note: Redeploying existing app (ID: {existing_apps['content-scraper-api']})")
+    if API_APP_NAME in existing_apps:
+        print(f"⚠️  Note: Redeploying existing app (ID: {existing_apps[API_APP_NAME]})")
 
     result = subprocess.run(
         [sys.executable, "-m", "modal", "deploy", str(api_path)],
@@ -111,9 +115,8 @@ def deploy_api():
         sys.exit(1)
 
     # Extract API URL from deployment output
-    # Looking for the web function URL in the deploy output
     # Example: https://tangentleman--content-scraper-api-fastapi-app.modal.run
-    url_pattern = r'https://[^\s]+--content-scraper-api[^\s]+\.modal\.run'
+    url_pattern = rf'https://[^\s]+--{API_APP_NAME}[^\s]+\.modal\.run'
     match = re.search(url_pattern, result.stdout)
 
     if not match:
@@ -166,8 +169,8 @@ def deploy_ui():
 
     # Check for existing deployment
     existing_apps = get_existing_apps()
-    if "docpull" in existing_apps:
-        print(f"⚠️  Note: Redeploying existing app (ID: {existing_apps['docpull']})")
+    if UI_APP_NAME in existing_apps:
+        print(f"⚠️  Note: Redeploying existing app (ID: {existing_apps[UI_APP_NAME]})")
 
     result = subprocess.run(
         [sys.executable, "-m", "modal", "deploy", str(ui_path)],
@@ -181,9 +184,8 @@ def deploy_ui():
         sys.exit(1)
 
     # Extract UI URL from deployment output
-    # Looking for the web function URL
-    # Example: https://tangentleman--docpull-web.modal.run
-    url_pattern = r'https://[^\s]+--docpull[^\s]+\.modal\.run'
+    # Example: https://tangentleman--docpull-ui.modal.run
+    url_pattern = rf'https://[^\s]+--{UI_APP_NAME}[^\s]+\.modal\.run'
     match = re.search(url_pattern, result.stdout)
 
     if not match:
