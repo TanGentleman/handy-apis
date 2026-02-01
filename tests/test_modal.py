@@ -12,13 +12,10 @@ import sys
 import time
 
 import httpx
-from dotenv import load_dotenv
-
-load_dotenv()
 
 API_BASE = os.environ.get(
     "SCRAPER_API_URL",
-    "https://tangentleman--content-scraper-api-fastapi-app-dev.modal.run",
+    "https://tangentleman--content-scraper-api-fastapi-app.modal.run",
 )
 
 DEFAULT_TIMEOUT = 15.0
@@ -27,21 +24,11 @@ BULK_TIMEOUT = 300.0
 MAX_CONCURRENCY = 50
 
 
-def get_auth_headers() -> dict:
-    """Get Modal auth headers from environment variables."""
-    key = os.environ.get("MODAL_KEY")
-    secret = os.environ.get("MODAL_SECRET")
-    if key and secret:
-        return {"Modal-Key": key, "Modal-Secret": secret}
-    return {}
-
-
 def fetch_sites_with_paths() -> list[dict]:
     """Fetch all sites with their test paths from the API."""
     resp = httpx.get(
         f"{API_BASE}/sites",
         params={"include_test_paths": "true"},
-        headers=get_auth_headers(),
         timeout=DEFAULT_TIMEOUT,
     )
     resp.raise_for_status()
@@ -60,7 +47,6 @@ async def _fetch_with_semaphore(
             resp = await client.get(
                 f"{API_BASE}/sites/{site_id}/content",
                 params={"path": path},
-                headers=get_auth_headers(),
             )
             if resp.status_code != 200:
                 return {"site_id": site_id, "error": f"HTTP {resp.status_code}"}
@@ -137,57 +123,6 @@ async def verify_all_cached() -> bool:
     return all_cached
 
 
-def run_sequential_tests():
-    """Run all tests sequentially with verbose output."""
-    print(f"Testing API: {API_BASE}")
-    print("=" * 60)
-
-    # Basic endpoints
-    tests = [
-        ("Root", f"{API_BASE}/", None),
-        ("Health", f"{API_BASE}/health", None),
-        ("Sites", f"{API_BASE}/sites", None),
-    ]
-
-    for name, url, params in tests:
-        print(f"\n{name} endpoint...")
-        resp = httpx.get(
-            url, params=params, headers=get_auth_headers(), timeout=DEFAULT_TIMEOUT
-        )
-        if resp.status_code == 200:
-            print(f"  ✓ {resp.json()}")
-        else:
-            print(f"  ✗ HTTP {resp.status_code}: {resp.text[:100]}")
-
-    # Links endpoint
-    print("\nLinks (modal)...")
-    resp = httpx.get(
-        f"{API_BASE}/sites/modal/links",
-        headers=get_auth_headers(),
-        timeout=CONTENT_TIMEOUT,
-    )
-    if resp.status_code == 200:
-        print(f"  ✓ {resp.json()['count']} links")
-    else:
-        print(f"  ✗ HTTP {resp.status_code}")
-
-    # Content endpoint
-    print("\nContent (modal /guide)...")
-    resp = httpx.get(
-        f"{API_BASE}/sites/modal/content",
-        params={"path": "/guide"},
-        headers=get_auth_headers(),
-        timeout=CONTENT_TIMEOUT,
-    )
-    if resp.status_code == 200:
-        print(f"  ✓ {resp.json()['content_length']} chars")
-    else:
-        print(f"  ✗ HTTP {resp.status_code}")
-
-    print("\n" + "=" * 60)
-    print("Sequential tests completed!")
-
-
 async def run_parallel_tests():
     """Fetch all sites in parallel, then verify caching."""
     print(f"Testing API: {API_BASE}")
@@ -206,11 +141,7 @@ async def run_parallel_tests():
 def test_jobs_list():
     """Test GET /jobs endpoint."""
     print("\nJobs list...")
-    resp = httpx.get(
-        f"{API_BASE}/jobs",
-        headers=get_auth_headers(),
-        timeout=DEFAULT_TIMEOUT,
-    )
+    resp = httpx.get(f"{API_BASE}/jobs", timeout=DEFAULT_TIMEOUT)
     if resp.status_code == 200:
         data = resp.json()
         print(f"  ✓ {len(data.get('jobs', []))} jobs")
@@ -223,17 +154,13 @@ def test_jobs_list():
 def test_job_status(job_id: str) -> dict | None:
     """Test GET /jobs/{job_id} endpoint."""
     print(f"\nJob status ({job_id})...")
-    resp = httpx.get(
-        f"{API_BASE}/jobs/{job_id}",
-        headers=get_auth_headers(),
-        timeout=DEFAULT_TIMEOUT,
-    )
+    resp = httpx.get(f"{API_BASE}/jobs/{job_id}", timeout=DEFAULT_TIMEOUT)
     if resp.status_code == 200:
         data = resp.json()
         print(f"  ✓ status={data['status']}, progress={data['progress_pct']}%")
         return data
     elif resp.status_code == 404:
-        print(f"  ✗ Job not found")
+        print("  ✗ Job not found")
         return None
     else:
         print(f"  ✗ HTTP {resp.status_code}")
@@ -249,7 +176,6 @@ def test_bulk_submit(urls: list[str], max_age: int | None = None) -> str | None:
     resp = httpx.post(
         f"{API_BASE}/jobs/bulk",
         json=payload,
-        headers=get_auth_headers(),
         timeout=BULK_TIMEOUT,
     )
     if resp.status_code == 200:
@@ -257,7 +183,6 @@ def test_bulk_submit(urls: list[str], max_age: int | None = None) -> str | None:
         job_id = data.get("job_id")
         if job_id:
             print(f"  ✓ job_id={job_id}, batches={data.get('batches', 0)}")
-            # Verify expected response fields
             assert "input" in data, "Missing 'input' in response"
             assert "status" in data, "Missing 'status' in response"
             return job_id
@@ -286,7 +211,6 @@ def wait_for_job(job_id: str, timeout_seconds: int = 120) -> dict | None:
             print(f"  ✓ Completed in {status['elapsed_seconds']}s "
                   f"(success={success}, skipped={skipped}, failed={failed})")
             return status
-        # Only sleep if progress hasn't changed (avoid spamming on fast jobs)
         curr_pct = status.get("progress_pct", 0)
         if curr_pct == last_pct:
             time.sleep(2)
@@ -302,19 +226,15 @@ def run_bulk_tests():
     print(f"Testing Bulk Job API: {API_BASE}")
     print("=" * 60)
 
-    # Test listing jobs (should work even if empty)
     test_jobs_list()
 
-    # Test job status for non-existent job
     print("\nTesting non-existent job...")
     test_job_status("nonexistent")
 
-    # Test bulk submit with empty URLs
     print("\nTesting empty URL list...")
     resp = httpx.post(
         f"{API_BASE}/jobs/bulk",
         json={"urls": []},
-        headers=get_auth_headers(),
         timeout=DEFAULT_TIMEOUT,
     )
     if resp.status_code == 400:
@@ -322,21 +242,17 @@ def run_bulk_tests():
     else:
         print(f"  ✗ Expected 400, got {resp.status_code}")
 
-    # Test bulk submit with unknown URLs only
     print("\nTesting unknown URLs...")
     job_id = test_bulk_submit(["https://unknown-site.example.com/page"])
     if job_id is None:
         print("  ✓ No job created for unknown URLs")
 
-    # Test bulk submit with asset URLs only
     print("\nTesting asset URLs...")
-    job_id = test_bulk_submit([
+    test_bulk_submit([
         "https://docs.modal.com/file.pdf",
         "https://docs.modal.com/image.png",
     ])
-    # Assets should be filtered, so may result in no job or empty job
 
-    # Test bulk submit with valid URLs (using modal as example)
     print("\nTesting valid URLs...")
     valid_urls = [
         "https://modal.com/docs/guide",
@@ -344,16 +260,14 @@ def run_bulk_tests():
     ]
     job_id = test_bulk_submit(valid_urls)
     if job_id:
-        # Wait for job to complete
         final_status = wait_for_job(job_id, timeout_seconds=60)
         if final_status:
             print(f"\nFinal progress: {final_status['progress']}")
             if final_status.get("errors"):
                 print(f"Errors: {final_status['errors'][:3]}")
 
-    # Test bulk submit with high max_age (should use cache from previous run)
     print("\nTesting with cache (high max_age)...")
-    job_id = test_bulk_submit(valid_urls, max_age=86400 * 7)  # 7 days
+    job_id = test_bulk_submit(valid_urls, max_age=86400 * 7)
     if job_id:
         final_status = wait_for_job(job_id, timeout_seconds=30)
         if final_status:
@@ -361,7 +275,6 @@ def run_bulk_tests():
             if skipped > 0:
                 print(f"  ✓ Cache working: {skipped} URLs skipped (already cached)")
 
-    # List jobs again to see the new job
     print("\n" + "=" * 60)
     test_jobs_list()
 
@@ -374,7 +287,6 @@ def run_sequential_tests():
     print(f"Testing API: {API_BASE}")
     print("=" * 60)
 
-    # Basic endpoints
     tests = [
         ("Root", f"{API_BASE}/", None),
         ("Health", f"{API_BASE}/health", None),
@@ -383,32 +295,23 @@ def run_sequential_tests():
 
     for name, url, params in tests:
         print(f"\n{name} endpoint...")
-        resp = httpx.get(
-            url, params=params, headers=get_auth_headers(), timeout=DEFAULT_TIMEOUT
-        )
+        resp = httpx.get(url, params=params, timeout=DEFAULT_TIMEOUT)
         if resp.status_code == 200:
             print(f"  ✓ {resp.json()}")
         else:
             print(f"  ✗ HTTP {resp.status_code}: {resp.text[:100]}")
 
-    # Links endpoint
     print("\nLinks (modal)...")
-    resp = httpx.get(
-        f"{API_BASE}/sites/modal/links",
-        headers=get_auth_headers(),
-        timeout=CONTENT_TIMEOUT,
-    )
+    resp = httpx.get(f"{API_BASE}/sites/modal/links", timeout=CONTENT_TIMEOUT)
     if resp.status_code == 200:
         print(f"  ✓ {resp.json()['count']} links")
     else:
         print(f"  ✗ HTTP {resp.status_code}")
 
-    # Content endpoint
     print("\nContent (modal /guide)...")
     resp = httpx.get(
         f"{API_BASE}/sites/modal/content",
         params={"path": "/guide"},
-        headers=get_auth_headers(),
         timeout=CONTENT_TIMEOUT,
     )
     if resp.status_code == 200:
@@ -416,7 +319,6 @@ def run_sequential_tests():
     else:
         print(f"  ✗ HTTP {resp.status_code}")
 
-    # Jobs list endpoint
     test_jobs_list()
 
     print("\n" + "=" * 60)
