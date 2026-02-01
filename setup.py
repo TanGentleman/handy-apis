@@ -65,7 +65,7 @@ def deploy_api():
         sys.exit(1)
 
     result = subprocess.run(
-        ["modal", "deploy", str(api_path)],
+        [sys.executable, "-m", "modal", "deploy", str(api_path)],
         capture_output=True,
         text=True
     )
@@ -123,7 +123,7 @@ def deploy_ui():
         sys.exit(1)
 
     result = subprocess.run(
-        ["modal", "deploy", str(ui_path)],
+        [sys.executable, "-m", "modal", "deploy", str(ui_path)],
         capture_output=True,
         text=True
     )
