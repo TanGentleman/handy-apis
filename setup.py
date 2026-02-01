@@ -102,7 +102,8 @@ def save_config(api_url):
 
     config_content = f'''"""Configuration for docpull UI."""
 
-API_URL = "{api_url}"
+SCRAPER_API_URL = "{api_url}"
+IS_PROD = False
 '''
 
     config_path.write_text(config_content)
