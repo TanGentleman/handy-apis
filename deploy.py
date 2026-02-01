@@ -65,22 +65,38 @@ def install_requirements():
     print("✅ Dependencies installed")
 
 
+def get_modal_command():
+    """Get the appropriate modal command prefix.
+
+    Returns:
+        list: Command prefix for running modal
+    """
+    # Check if uv is available
+    uv_check = subprocess.run(["uv", "--version"], capture_output=True)
+    if uv_check.returncode == 0:
+        return ["uv", "run", "modal"]
+    else:
+        # Use python -m modal when not using uv
+        return [sys.executable, "-m", "modal"]
+
+
 def get_existing_apps():
     """Get list of existing Modal apps.
 
     Returns:
         dict: Map of app description to app ID for docpull apps
     """
-    result = subprocess.run(
-        ["modal", "app", "list", "--json"],
-        capture_output=True,
-        text=True
-    )
-
-    if result.returncode != 0:
-        return {}
-
     try:
+        modal_cmd = get_modal_command()
+        result = subprocess.run(
+            modal_cmd + ["app", "list", "--json"],
+            capture_output=True,
+            text=True
+        )
+
+        if result.returncode != 0:
+            return {}
+
         apps = json.loads(result.stdout)
         return {
             app["Description"]: app["App ID"]
@@ -88,7 +104,7 @@ def get_existing_apps():
             if app["State"] == "deployed"
             and app["Description"] in {API_APP_NAME, UI_APP_NAME}
         }
-    except (json.JSONDecodeError, KeyError):
+    except (json.JSONDecodeError, KeyError, FileNotFoundError):
         return {}
 
 
@@ -110,8 +126,9 @@ def deploy_api():
     if API_APP_NAME in existing_apps:
         print(f"⚠️  Note: Redeploying existing app (ID: {existing_apps[API_APP_NAME]})")
 
+    modal_cmd = get_modal_command()
     result = subprocess.run(
-        [sys.executable, "-m", "modal", "deploy", str(api_path)],
+        modal_cmd + ["deploy", str(api_path)],
         capture_output=True,
         text=True
     )
@@ -187,8 +204,9 @@ def deploy_ui():
     if UI_APP_NAME in existing_apps:
         print(f"⚠️  Note: Redeploying existing app (ID: {existing_apps[UI_APP_NAME]})")
 
+    modal_cmd = get_modal_command()
     result = subprocess.run(
-        [sys.executable, "-m", "modal", "deploy", str(ui_path)],
+        modal_cmd + ["deploy", str(ui_path)],
         capture_output=True,
         text=True
     )
