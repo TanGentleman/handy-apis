@@ -3,5 +3,4 @@ __pycache__/
 .env
 .venv/
 convex-backend/convex/_generated/
-config/settings.py
 setup/logs/
