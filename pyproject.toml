@@ -9,7 +9,6 @@ dependencies = [
     "httpx>=0.28.1",
     "modal>=1.2.5",
     "python-dotenv>=1.2.1",
-    "sse-starlette>=2.0.0",
     "typer>=0.15.0",
     "uvicorn>=0.40.0",
 ]

@@ -15,6 +15,7 @@ import json
 import re
 import subprocess
 import sys
+import webbrowser
 from pathlib import Path
 
 
@@ -152,12 +153,13 @@ def deploy_ui():
     return ui_url
 
 
-def display_summary(api_url, ui_url):
+def display_summary(api_url, ui_url, open_browser=False):
     """Display deployment summary.
 
     Args:
         api_url: The deployed API URL
         ui_url: The deployed UI URL
+        open_browser: Whether to open the UI in browser
     """
     print("\n" + "=" * 60)
     print("🎉 Deployment Complete!")
@@ -170,6 +172,10 @@ def display_summary(api_url, ui_url):
     print("  - Use the CLI: python cli/main.py sites")
     print("=" * 60)
 
+    if open_browser:
+        print("\n🌐 Opening UI in browser...")
+        webbrowser.open(ui_url)
+
 
 def main():
     """Run the deployment process."""
@@ -180,9 +186,15 @@ def main():
         action="store_true",
         help="Output results in JSON format (for programmatic use)",
     )
+    parser.add_argument(
+        "--open-browser",
+        action="store_true",
+        help="Open the deployed UI in your browser after deployment",
+    )
     args = parser.parse_args()
 
     json_mode = args.json
+    open_browser = args.open_browser
 
     if not json_mode:
         print("🔧 Docpull Deployment Setup")
@@ -214,7 +226,7 @@ def main():
             }
             print(json.dumps(result))
         else:
-            display_summary(api_url, ui_url)
+            display_summary(api_url, ui_url, open_browser=open_browser)
 
     except SystemExit as e:
         if json_mode and e.code != 0:
