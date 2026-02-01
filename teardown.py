@@ -19,6 +19,21 @@ ALIAS_START = "# >>> docpull alias >>>"
 ALIAS_END = "# <<< docpull alias <<<"
 
 
+def get_modal_command():
+    """Get the appropriate modal command prefix.
+
+    Returns:
+        list: Command prefix for running modal
+    """
+    # Check if uv is available - if so, use uv run modal
+    uv_check = subprocess.run(["uv", "--version"], capture_output=True)
+    if uv_check.returncode == 0:
+        return ["uv", "run", "modal"]
+    else:
+        # Use python -m modal when not using uv
+        return [sys.executable, "-m", "modal"]
+
+
 def get_deployed_apps():
     """Get list of deployed Modal apps.
 
@@ -26,8 +41,9 @@ def get_deployed_apps():
         list: List of app dictionaries from modal app list --json
     """
     print("\n📋 Fetching deployed apps...")
+    modal_cmd = get_modal_command()
     result = subprocess.run(
-        ["modal", "app", "list", "--json"],
+        modal_cmd + ["app", "list", "--json"],
         capture_output=True,
         text=True
     )
@@ -72,8 +88,9 @@ def stop_app(app_id, description):
         bool: True if stop succeeded
     """
     print(f"\n🛑 Stopping {description} ({app_id})...")
+    modal_cmd = get_modal_command()
     result = subprocess.run(
-        ["modal", "app", "stop", app_id],
+        modal_cmd + ["app", "stop", app_id],
         capture_output=True,
         text=True
     )
