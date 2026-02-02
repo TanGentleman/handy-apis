@@ -91,7 +91,7 @@ async def call_scraper_api(
     json_body: dict | None = None,
     params: dict | None = None,
 ) -> dict:
-    """Proxy request to scraper API, forwarding auth headers."""
+    """Proxy request to scraper API, forwarding auth headers and access key."""
     import httpx
 
     # Forward Modal auth headers from the incoming request
@@ -100,6 +100,12 @@ async def call_scraper_api(
         headers["Modal-Key"] = request.headers["modal-key"]
     if "modal-secret" in request.headers:
         headers["Modal-Secret"] = request.headers["modal-secret"]
+
+    # Forward access_key from query params
+    access_key = request.query_params.get("access_key")
+    if access_key:
+        params = params or {}
+        params["access_key"] = access_key
 
     url = f"{get_scraper_api_url()}{path}"
 

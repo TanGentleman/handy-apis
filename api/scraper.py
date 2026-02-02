@@ -18,6 +18,16 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+# Access key verification
+import os
+_ACCESS_KEY = os.environ.get("ACCESS_KEY")
+
+def verify_access_key(provided_key: str | None) -> bool:
+    """Verify if the provided access key matches the configured one."""
+    if not _ACCESS_KEY:
+        return True  # No key configured = open access
+    return provided_key == _ACCESS_KEY
+
 from api.bulk import (
     DEFAULT_DELAY_MS,
     USER_AGENT,
@@ -41,9 +51,9 @@ playwright_image = (
         "playwright install-deps chromium",
         "playwright install chromium",
     )
-    .pip_install("fastapi[standard]", "pydantic", "httpx", "markdownify")
+    .pip_install("fastapi[standard]", "pydantic", "httpx", "markdownify", "python-dotenv")
     .add_local_dir("api", "/root/api")
-    .add_local_file("config/sites.json", "/root/config/sites.json")
+    .add_local_dir("config", "/root/config")
 )
 
 app = modal.App("content-scraper-api", image=playwright_image)
@@ -1192,8 +1202,13 @@ async def cache_stats():
 
 
 @web_app.delete("/cache/{site_id}")
-async def clear_cache(site_id: str):
-    """Clear cache for a site."""
+async def clear_cache(
+    site_id: str,
+    access_key: str = Query(default=None, description="Access key for protected operations"),
+):
+    """Clear cache for a site (protected operation)."""
+    if not verify_access_key(access_key):
+        raise HTTPException(status_code=403, detail="Invalid or missing access key")
     deleted = 0
     keys_to_delete = []
 
@@ -1235,16 +1250,25 @@ async def get_errors():
 
 
 @web_app.delete("/errors")
-async def clear_all_errors():
-    """Clear all error tracking data."""
+async def clear_all_errors(
+    access_key: str = Query(default=None, description="Access key for protected operations"),
+):
+    """Clear all error tracking data (protected operation)."""
+    if not verify_access_key(access_key):
+        raise HTTPException(status_code=403, detail="Invalid or missing access key")
     count = len(list(error_tracker.keys()))
     error_tracker.clear()
     return {"cleared": count}
 
 
 @web_app.delete("/errors/{site_id}")
-async def clear_site_errors(site_id: str):
-    """Clear error tracking for a specific site."""
+async def clear_site_errors(
+    site_id: str,
+    access_key: str = Query(default=None, description="Access key for protected operations"),
+):
+    """Clear error tracking for a specific site (protected operation)."""
+    if not verify_access_key(access_key):
+        raise HTTPException(status_code=403, detail="Invalid or missing access key")
     deleted = 0
     keys_to_delete = []
 
@@ -1266,8 +1290,11 @@ async def index_site(
         default=DEFAULT_MAX_AGE, description="Max cache age in seconds"
     ),
     max_concurrent: int = Query(default=50, description="Max concurrent requests"),
+    access_key: str = Query(default=None, description="Access key for protected operations"),
 ):
-    """Fetch all pages for a site in parallel, respecting cache."""
+    """Fetch all pages for a site in parallel (protected operation)."""
+    if not verify_access_key(access_key):
+        raise HTTPException(status_code=403, detail="Invalid or missing access key")
     sites_config = load_sites_config()
     config = sites_config.get(site_id)
     if not config:
@@ -1503,7 +1530,10 @@ Generated: {time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime())}
 
 
 @web_app.post("/export/zip")
-async def export_urls_as_zip(request: ExportRequest):
+async def export_urls_as_zip(
+    request: ExportRequest,
+    access_key: str = Query(default=None, description="Access key (required when scraping)"),
+):
     """Export a list of URLs as a ZIP file with docs/{site}/{path}.md structure.
 
     Takes arbitrary URLs, resolves them to configured sites using longest-prefix
@@ -1515,9 +1545,15 @@ async def export_urls_as_zip(request: ExportRequest):
     - cached_only: If true (default), only return cached content (no scraping)
     - max_age: Max cache age in seconds (default 48h)
     - include_manifest: If true (default), include manifest.json with metadata
+
+    Access key required when cached_only=false (scraping enabled).
     """
     urls = request.urls
     cached_only = request.cached_only
+
+    # Require access key when scraping is enabled
+    if not cached_only and not verify_access_key(access_key):
+        raise HTTPException(status_code=403, detail="Access key required for scraping")
     max_age = request.max_age
     include_manifest = request.include_manifest
 
@@ -1722,12 +1758,17 @@ async def export_urls_as_zip(request: ExportRequest):
 
 # --- Bulk Job Endpoints ---
 @web_app.post("/jobs/bulk")
-async def submit_bulk_job(request: BulkScrapeRequest):
-    """Submit a bulk scrape job (fire-and-forget).
+async def submit_bulk_job(
+    request: BulkScrapeRequest,
+    access_key: str = Query(default=None, description="Access key for protected operations"),
+):
+    """Submit a bulk scrape job (protected operation).
 
     Groups URLs by site, distributes across workers, and returns immediately.
     Use GET /jobs/{job_id} to check progress.
     """
+    if not verify_access_key(access_key):
+        raise HTTPException(status_code=403, detail="Invalid or missing access key")
     if not request.urls:
         raise HTTPException(400, "No URLs provided")
 

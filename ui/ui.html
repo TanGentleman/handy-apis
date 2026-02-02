@@ -1183,7 +1183,9 @@
       hideOutput(output);
 
       try {
-        const res = await fetch(`${API}/export`, {
+        // Use access key when scraping is enabled (protected operation)
+        const endpoint = scrape ? withAccessKey(`${API}/export`) : `${API}/export`;
+        const res = await fetch(endpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ urls, cached_only: !scrape })
