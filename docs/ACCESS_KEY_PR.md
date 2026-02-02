@@ -7,7 +7,7 @@ This PR adds access key infrastructure for protecting sensitive operations in do
 ## What Was Implemented
 
 ### Backend (`config/utils.py`)
-- `ACCESS_KEY` environment variable loaded from `config/.env` or root `.env`
+- `ACCESS_KEY` environment variable loaded from root `.env`
 - `get_access_key()` - returns the configured key (or None if not set)
 - `verify_access_key(provided_key)` - returns True if key matches or no key is configured
 
@@ -19,8 +19,8 @@ This PR adds access key infrastructure for protecting sensitive operations in do
 - localStorage persistence (`docpull_access_key`)
 
 ### Configuration
-- `config/.env.example` - template showing `ACCESS_KEY=your-secret-key-here`
-- `config/.env` - actual config (gitignored)
+- `.env.example` - template showing `ACCESS_KEY=your-secret-key-here`
+- `.env` - actual config (gitignored)
 
 ---
 
@@ -134,7 +134,7 @@ async def call_scraper_api(
 4. **Audit logging**: Log access key usage with timestamps
 
 ### Key Storage
-- Never commit `config/.env` (gitignored)
+- Never commit `.env` (gitignored)
 - Use strong, random keys (e.g., `openssl rand -hex 32`)
 - Rotate keys periodically
 
@@ -160,8 +160,8 @@ modal serve api/scraper.py
 # Test without key (should work if no key configured)
 curl -X DELETE "http://localhost:8000/cache/test-site"
 
-# Set key in config/.env
-echo "ACCESS_KEY=test-key-123" > config/.env
+# Set key in .env
+echo "ACCESS_KEY=test-key-123" >> .env
 
 # Test without key (should fail)
 curl -X DELETE "http://localhost:8000/cache/test-site"
@@ -192,7 +192,5 @@ curl -X DELETE "http://localhost:8000/cache/test-site?access_key=wrong"
 | File | Changes |
 |------|---------|
 | `config/utils.py` | Added `ACCESS_KEY`, `get_access_key()`, `verify_access_key()` |
-| `config/.env.example` | New file with key template |
-| `config/.env` | Created (gitignored) |
+| `.env.example` | New file with key template |
 | `ui/ui.html` | Access key input, JS helpers, localStorage |
-| `.gitignore` | Added `config/.env` |

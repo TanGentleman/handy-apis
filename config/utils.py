@@ -12,15 +12,12 @@ Environment variables:
 import os
 from pathlib import Path
 
-# Load .env file from config/ or project root if it exists
+# Load .env file from project root if it exists
 try:
     from dotenv import load_dotenv
-    _config_env_path = Path(__file__).parent / ".env"
-    _root_env_path = Path(__file__).parent.parent / ".env"
-    if _config_env_path.exists():
-        load_dotenv(_config_env_path)
-    elif _root_env_path.exists():
-        load_dotenv(_root_env_path)
+    _env_path = Path(__file__).parent.parent / ".env"
+    if _env_path.exists():
+        load_dotenv(_env_path)
 except (ImportError, PermissionError, OSError):
     pass  # dotenv not installed or .env not accessible, rely on environment variables
 
