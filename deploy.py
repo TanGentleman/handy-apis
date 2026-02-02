@@ -285,11 +285,14 @@ def deploy_ui():
     return ui_url
 
 
-def setup_global_alias():
-    """Prompt user to add global docpull alias to zshrc.
+def setup_global_alias(skip_prompt=False):
+    """Add global docpull alias to zshrc.
+
+    Args:
+        skip_prompt: If True, add alias without prompting (default behavior)
 
     Returns:
-        bool: True if alias was added, False otherwise
+        bool: True if alias was added or already exists, False otherwise
     """
     project_dir = Path(__file__).parent.resolve()
     zshrc_path = Path.home() / ".zshrc"
@@ -301,17 +304,20 @@ def setup_global_alias():
             print("\n✅ Global docpull alias already configured in ~/.zshrc")
             return True
 
-    print("\n🔧 Setup global 'docpull' command?")
-    print(f"   This will add an alias to ~/.zshrc pointing to {project_dir}/docpull")
+    if not skip_prompt:
+        print("\n🔧 Setup global 'docpull' command?")
+        print(f"   This will add an alias to ~/.zshrc pointing to {project_dir}/docpull")
 
-    try:
-        response = input("   Add global docpull command? [y/N]: ").strip().lower()
-    except EOFError:
-        return False
+        try:
+            response = input("   Add global docpull command? [Y/n]: ").strip().lower()
+        except EOFError:
+            response = "n"
 
-    if response != "y":
-        print("   Skipped. Use 'python -m cli.main' for local CLI access.")
-        return False
+        if response not in ("", "y", "yes"):
+            print("   Skipped. Use 'python -m cli.main' for local CLI access.")
+            return False
+    else:
+        print(f"\n🔧 Adding global 'docpull' command to ~/.zshrc...")
 
     # Build the alias block
     alias_block = f"""\n{ALIAS_START}
@@ -383,11 +389,17 @@ Examples:
         action="store_true",
         help="Skip dependency installation (assumes already installed)",
     )
+    parser.add_argument(
+        "--no-alias",
+        action="store_true",
+        help="Skip adding global docpull alias to ~/.zshrc",
+    )
     args = parser.parse_args()
 
     json_mode = args.json
     open_browser = args.open_browser
     skip_install = args.skip_install
+    no_alias = args.no_alias
 
     if not json_mode:
         print("🔧 Docpull Deployment Setup")
@@ -412,9 +424,9 @@ Examples:
         # Step 5: Deploy UI
         ui_url = deploy_ui()
 
-        # Step 6: Setup global alias (interactive prompt)
-        if not json_mode:
-            setup_global_alias()
+        # Step 6: Setup global alias (by default, skip prompt)
+        if not json_mode and not no_alias:
+            setup_global_alias(skip_prompt=True)
 
         # Step 7: Display summary
         if json_mode:
