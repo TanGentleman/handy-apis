@@ -32,22 +32,35 @@ def check_venv():
         return
 
     # For non-uv users, check for existing venv
-    if not venv_path.exists():
-        print("❌ Error: No virtual environment found at .venv/")
-        print("\nPlease create one:")
-        print(f"  python -m venv {venv_path}")
-        print(f"  source {venv_path}/bin/activate")
-        print("  pip install -e .")
-        sys.exit(1)
-
-    # Check if we're using the project's venv or if it exists
     venv_python = venv_path / "bin" / "python"
-    if not venv_python.exists():
-        print(f"❌ Error: Invalid virtual environment at {venv_path}")
-        print("\nPlease recreate it:")
-        print(f"  rm -rf {venv_path}")
-        print(f"  python -m venv {venv_path}")
-        sys.exit(1)
+
+    if not venv_path.exists() or not venv_python.exists():
+        print("⚠️  No virtual environment found at .venv/")
+        try:
+            response = input("   Create one now? [Y/n]: ").strip().lower()
+        except EOFError:
+            response = "n"
+
+        if response in ("", "y", "yes"):
+            print("\n🔧 Creating virtual environment...")
+            result = subprocess.run(
+                [sys.executable, "-m", "venv", str(venv_path)],
+                capture_output=True,
+                text=True
+            )
+            if result.returncode != 0:
+                print(f"❌ Error creating virtual environment:")
+                print(result.stderr)
+                sys.exit(1)
+            print("✅ Virtual environment created")
+        else:
+            print("\nTo create manually:")
+            print(f"  python -m venv {venv_path}")
+            print(f"  source {venv_path}/bin/activate")
+            print("  pip install -e .")
+            sys.exit(1)
+    else:
+        print("✅ Virtual environment detected")
 
     print("✅ Virtual environment detected")
 
