@@ -7,24 +7,24 @@ Modal-based documentation scraper.
 ```
 docpull/
 ├── api/                    # Modal API
-│   ├── scraper.py         # FastAPI endpoints
+│   ├── server.py          # FastAPI endpoints + UI serving
+│   ├── worker.py          # Playwright browser automation
 │   ├── bulk.py            # Bulk job handling
 │   └── urls.py            # URL utilities
 ├── cli/main.py            # Typer CLI
 ├── config/
 │   ├── sites.json         # Site definitions
 │   └── utils.py           # Env loading
-├── ui/app.py              # Gradio UI
-├── deploy.py              # Deploy script
+├── ui/ui.html             # Web UI (served by server.py)
+├── deploy.py              # Deploy script (single app)
 └── teardown.py            # Stop deployments
 ```
 
 ## Development
 
 ```bash
-modal serve api/scraper.py   # API with hot-reload
-modal serve ui/app.py        # UI with hot-reload
-python deploy.py              # Deploy both
+modal serve api/server.py    # API + UI with hot-reload
+python deploy.py             # Deploy to Modal
 ```
 
 ## Adding Sites
