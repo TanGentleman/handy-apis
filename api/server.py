@@ -340,16 +340,6 @@ async def scrape_links_fetch(site_id: str, config: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# HTML content (served at /)
-# ---------------------------------------------------------------------------
-_HTML_FILE = Path("/root/ui.html")
-if _HTML_FILE.exists():
-    _HTML_CONTENT = _HTML_FILE.read_text()
-else:
-    _HTML_CONTENT = (Path(__file__).parent.parent / "ui" / "ui.html").read_text()
-
-
-# ---------------------------------------------------------------------------
 # FastAPI app
 # ---------------------------------------------------------------------------
 web_app = FastAPI(title="Content Scraper API")
@@ -357,10 +347,13 @@ web_app = FastAPI(title="Content Scraper API")
 
 # --- UI -----------------------------------------------------------
 
+HTML_CONTENT = None
 
 @web_app.get("/", response_class=HTMLResponse)
 async def serve_ui():
-    return _HTML_CONTENT
+    if HTML_CONTENT is None:
+        HTML_CONTENT = Path("/root/ui.html").read_text()
+    return HTMLResponse(content=HTML_CONTENT, media_type="text/html")
 
 
 @web_app.get("/health")
