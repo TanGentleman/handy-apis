@@ -136,30 +136,51 @@ class PlaywrightWorker:
 
     @modal.method()
     def scrape_content(self, site_id: str, path: str, config: dict) -> dict:
-        """Scrape content from a single page."""
+        """Scrape content from a single page.
+
+        Returns:
+            {"content": str, "metadata": dict}  on success
+            {"error": str, "code": str}         on failure
+        """
         ...
 
     @modal.method()
-    def scrape_links(self, site_id: str, config: dict) -> list[str]:
-        """Browser-based link discovery (for JS-rendered pages)."""
+    def scrape_links(self, site_id: str, config: dict) -> dict:
+        """Browser-based link discovery (for JS-rendered pages).
+
+        Returns:
+            {"content": list[str], "metadata": dict}  on success
+            {"error": str, "code": str}               on failure
+        """
         ...
 
     @modal.method()
     def discover_selectors(self, url: str) -> dict:
-        """Analyze page structure for site configuration."""
+        """Analyze page structure for site configuration.
+
+        Returns:
+            {"content": dict, "metadata": dict}  on success
+            {"error": str, "code": str}          on failure
+        """
         ...
 
     @modal.method()
-    def process_batch(self, job_id: str, site_id: str, paths: list[str], config: dict) -> dict:
-        """Process a batch of pages for bulk jobs."""
+    def process_batch(self, job_id: str, site_id: str, paths: list[str], config: dict, batch_size: int = 25) -> dict:
+        """Process a batch of pages for bulk jobs.
+
+        Returns:
+            {"content": list[dict], "metadata": dict}  on success
+            {"error": str, "code": str}                on failure
+        """
         ...
 ```
 
 **Key Design Decisions**:
 - Single class keeps browser lifecycle simple
-- Methods receive `config` dict (site configuration) to avoid coupling to sites.json
-- Returns dicts that the API server can cache/process
-- `process_batch` updates job progress in Modal Dict directly
+- Methods receive full `config` dict (entire site configuration) to avoid coupling to sites.json
+- All methods return `dict`: either `{"content": ..., "metadata": ...}` on success or `{"error": "message", "code": "..."}` on failure
+- Workers never write to cache — they return data, and the server handles all cache writes
+- `process_batch` accepts a configurable `batch_size` parameter (default: 25)
 
 ### 3. Cache Refresh Script (`scripts/refresh_cache.py`)
 
@@ -237,16 +258,18 @@ CLI/UI
    ▼
 ┌─────────────────────────────────────────────────────┐
 │  FastAPI Server                                     │
-│  POST /jobs/bulk                                    │
+│  POST /jobs/bulk  (optional: batch_size)            │
 │                                                     │
 │  1. Parse URLs, group by site                       │
 │  2. Filter cached URLs (only scrape misses)         │
 │  3. Create job record in Modal Dict                 │
-│  4. For each batch:                                 │
+│  4. Split uncached paths into chunks of batch_size  │
+│     (default: 25)                                   │
+│  5. For each chunk:                                 │
 │     PlaywrightWorker().process_batch.spawn(         │
-│         job_id, site_id, paths, config              │
+│         job_id, site_id, paths, config, batch_size  │
 │     )                                               │
-│  5. Return job_id immediately (fire-and-forget)     │
+│  6. Return job_id immediately (fire-and-forget)     │
 └─────────────────────────────────────────────────────┘
                        │
                        │ (async, parallel)
@@ -256,9 +279,19 @@ CLI/UI
 │                                                     │
 │  1. For each path in batch:                         │
 │     - Scrape content                                │
-│     - Write to cache (Modal Dict)                   │
-│     - Update job progress                           │
-│  2. Return batch results                            │
+│     - Return {content, metadata} or {error, code}   │
+│  2. Return all batch results to server              │
+└─────────────────────────────────────────────────────┘
+                       │
+                       │ (results returned to server)
+                       ▼
+┌─────────────────────────────────────────────────────┐
+│  FastAPI Server (cache write)                       │
+│                                                     │
+│  1. Receive batch results from worker               │
+│  2. Write successful results to Modal Dict cache    │
+│  3. Log errors from error dicts                     │
+│  4. Update job progress in Modal Dict               │
 └─────────────────────────────────────────────────────┘
 ```
 
@@ -270,14 +303,14 @@ The UI proxy routes become direct routes:
 - `GET /api/*` → Handled directly (no proxy hop)
 
 ### Unchanged Endpoints
-All existing API endpoints remain the same:
+All existing API endpoints remain the same, with the following additions:
 - `GET /sites` - List sites
 - `GET /sites/{site_id}/links` - Get links
 - `GET /sites/{site_id}/content` - Get content
-- `POST /sites/{site_id}/index` - Index entire site
+- `POST /sites/{site_id}/index` - Index entire site (optional `batch_size`, default: 25)
 - `GET /sites/{site_id}/download` - Download as ZIP
 - `POST /export/zip` - Export URLs as ZIP
-- `POST /jobs/bulk` - Submit bulk job
+- `POST /jobs/bulk` - Submit bulk job (optional `batch_size`, default: 25)
 - `GET /jobs/{job_id}` - Job status
 - `GET /jobs` - List jobs
 - `GET /cache/stats` - Cache stats
@@ -343,14 +376,14 @@ All existing API endpoints remain the same:
 2. Update teardown.py
 3. Test full flow
 
-## Open Questions
+## Design Decisions
 
-1. **Worker container sizing**: Should PlaywrightWorker use `cpu=1.0` or more? Current Scraper uses default.
+The following decisions were made during architecture planning and are reflected throughout this document.
 
-2. **Batch size for bulk jobs**: Currently 25 URLs per batch. Should this be configurable?
-
-3. **Error handling**: Should worker methods raise exceptions or return error dicts? Currently mixed.
-
-4. **Config passing**: Pass full config dict to workers, or just the fields they need?
-
-5. **Cache writes**: Should workers write to cache directly, or return content for server to cache?
+| Decision | Choice | Rationale |
+|----------|--------|-----------|
+| **Cache writes** | Server caches | Workers return data; the FastAPI server handles all writes to Modal Dict. Keeps workers stateless and simplifies cache logic. |
+| **Error handling** | Return error dicts | All worker methods return `{"error": "message", "code": "..."}` on failure instead of raising exceptions. Allows the server to handle errors uniformly and log/retry without catching scattered exceptions. |
+| **Config passing** | Full config dict | Workers receive the entire site config dict. Avoids coupling workers to `sites.json` and keeps the worker interface stable as config fields evolve. |
+| **Batch size** | Configurable | `POST /jobs/bulk` and `POST /sites/{id}/index` accept an optional `batch_size` parameter (default: 25). Allows tuning throughput vs. per-container memory for different sites. |
+| **Migration phases** | 5-phase approach | The migration path above follows the documented 5 phases (extract worker → merge UI → refactor server → extract refresh script → update deploy). Each phase keeps the app in a working state. |
