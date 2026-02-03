@@ -12,9 +12,8 @@ import sys
 import webbrowser
 from pathlib import Path
 
-# App names for Modal deployments (must match teardown.py)
+# App name for Modal deployment (must match teardown.py)
 API_APP_NAME = "content-scraper-api"
-UI_APP_NAME = "docpull"
 
 # Delimiters for managed zshrc section
 ALIAS_START = "# >>> docpull alias >>>"
@@ -154,7 +153,7 @@ def get_existing_apps():
             app["Description"]: app["App ID"]
             for app in apps
             if app["State"] == "deployed"
-            and app["Description"] in {API_APP_NAME, UI_APP_NAME}
+            and app["Description"] == API_APP_NAME
         }
     except (json.JSONDecodeError, KeyError, FileNotFoundError):
         return {}
@@ -167,7 +166,7 @@ def deploy_api():
         str: API URL from deployment output
     """
     print("\n🚀 Deploying Modal API...")
-    api_path = Path(__file__).parent / "api" / "scraper.py"
+    api_path = Path(__file__).parent / "api" / "server.py"
 
     if not api_path.exists():
         print(f"❌ Error: {api_path} not found")
@@ -238,52 +237,6 @@ IS_PROD=false
         sys.exit(1)
 
 
-def deploy_ui():
-    """Deploy Modal UI and extract URL.
-
-    Returns:
-        str: UI URL from deployment output
-    """
-    print("\n🚀 Deploying Modal UI...")
-    ui_path = Path(__file__).parent / "ui" / "app.py"
-
-    if not ui_path.exists():
-        print(f"❌ Error: {ui_path} not found")
-        sys.exit(1)
-
-    # Check for existing deployment
-    existing_apps = get_existing_apps()
-    if UI_APP_NAME in existing_apps:
-        print(f"⚠️  Note: Redeploying existing app (ID: {existing_apps[UI_APP_NAME]})")
-
-    modal_cmd = get_modal_command()
-    result = subprocess.run(
-        modal_cmd + ["deploy", str(ui_path)],
-        capture_output=True,
-        text=True
-    )
-
-    if result.returncode != 0:
-        print("❌ Error deploying UI:")
-        print(result.stderr)
-        sys.exit(1)
-
-    # Extract UI URL from deployment output
-    # Example: https://<username>--docpull-ui.modal.run
-    url_pattern = rf'https://[^\s]+--{UI_APP_NAME}[^\s]+\.modal\.run'
-    match = re.search(url_pattern, result.stdout)
-
-    if not match:
-        print("❌ Error: Could not extract UI URL from deployment output")
-        print("\nDeployment output:")
-        print(result.stdout)
-        print("\nSearching for URL pattern:", url_pattern)
-        sys.exit(1)
-
-    ui_url = match.group(0)
-    print(f"✅ UI deployed: {ui_url}")
-    return ui_url
-
 
 def setup_global_alias(skip_prompt=False):
     """Add global docpull alias to zshrc.
@@ -335,30 +288,28 @@ alias docpull="{project_dir}/docpull"
         return False
 
 
-def display_summary(api_url, ui_url, open_browser=False):
+def display_summary(api_url, open_browser=False):
     """Display deployment summary.
 
     Args:
-        api_url: The deployed API URL
-        ui_url: The deployed UI URL
-        open_browser: Whether to open the UI in browser
+        api_url: The deployed API URL (also serves the UI at /)
+        open_browser: Whether to open the URL in browser
     """
     print("\n" + "=" * 60)
     print("🎉 Deployment Complete!")
     print("=" * 60)
-    print(f"\n📡 API URL:  {api_url}")
-    print(f"🌐 UI URL:   {ui_url}")
+    print(f"\n🌐 URL:      {api_url}")
     print("\n📚 Next steps:")
-    print("  - Test the API: curl " + api_url)
-    print("  - Visit the UI in your browser")
+    print("  - Open in browser for the UI")
+    print("  - Test the API: curl " + api_url + "/health")
     print("  - Use the CLI: python -m cli.main sites")
     print("\n🛑 To stop deployments:")
     print("  python teardown.py")
     print("=" * 60)
 
     if open_browser:
-        print("\n🌐 Opening UI in browser...")
-        webbrowser.open(ui_url)
+        print("\n🌐 Opening in browser...")
+        webbrowser.open(api_url)
 
 
 def main():
@@ -415,30 +366,25 @@ Examples:
         elif not json_mode:
             print("\n⏭️  Skipping dependency installation")
 
-        # Step 3: Deploy API
+        # Step 3: Deploy API (also serves the UI)
         api_url = deploy_api()
 
         # Step 4: Save configuration
         save_config(api_url)
 
-        # Step 5: Deploy UI
-        ui_url = deploy_ui()
-
-        # Step 6: Setup global alias (by default, skip prompt)
+        # Step 5: Setup global alias (by default, skip prompt)
         if not json_mode and not no_alias:
             setup_global_alias(skip_prompt=True)
 
-        # Step 7: Display summary
+        # Step 6: Display summary
         if json_mode:
-            # Output JSON for programmatic parsing
             result = {
                 "status": "success",
                 "api_url": api_url,
-                "ui_url": ui_url,
             }
             print(json.dumps(result))
         else:
-            display_summary(api_url, ui_url, open_browser=open_browser)
+            display_summary(api_url, open_browser=open_browser)
 
     except KeyboardInterrupt:
         print("\n\n⚠️  Deployment cancelled by user")
