@@ -117,7 +117,7 @@ playwright_image = (
 ```python
 @app.cls(
     image=playwright_image,
-    container_idle_timeout=300,
+    scaledown_window=300,
     timeout=120,
 )
 class PlaywrightWorker:

@@ -63,7 +63,7 @@ from api.worker import PlaywrightWorkerBase, playwright_image  # noqa: E402
 
 PlaywrightWorker = app.cls(
     image=playwright_image,
-    container_idle_timeout=300,
+    scaledown_window=300,
     timeout=300,
     retries=2,
 )(PlaywrightWorkerBase)
