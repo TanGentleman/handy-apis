@@ -346,14 +346,10 @@ web_app = FastAPI(title="Content Scraper API")
 
 
 # --- UI -----------------------------------------------------------
-
-HTML_CONTENT = None
-
 @web_app.get("/", response_class=HTMLResponse)
 async def serve_ui():
-    if HTML_CONTENT is None:
-        HTML_CONTENT = Path("/root/ui.html").read_text()
-    return HTMLResponse(content=HTML_CONTENT, media_type="text/html")
+    html_content = Path("/root/ui.html").read_text()
+    return HTMLResponse(content=html_content, media_type="text/html")
 
 
 @web_app.get("/health")
