@@ -13,6 +13,7 @@
 #
 # Browser work is dispatched to PlaywrightWorker (api/worker.py).
 
+import os
 import asyncio
 import io
 import json
@@ -38,15 +39,36 @@ from api.bulk import (
 )
 from api.urls import clean_url, is_asset_url, normalize_page_path, normalize_path, normalize_url
 
+def get_app_name() -> str:
+    from dotenv import load_dotenv
+    local_env_path = Path(__file__).parent.parent / ".env"
+    remote_env_path = Path("/root/.env")
+    if not local_env_path.exists() and not remote_env_path.exists():
+        raise FileNotFoundError(f"Environment file not found: {local_env_path}")
+    if local_env_path.exists():
+        load_dotenv(local_env_path)
+    else:
+        load_dotenv(remote_env_path)
+    if not os.environ.get("APP_NAME"):
+        print(f"APP_NAME is not set in the environment file: {local_env_path}")
+        return "doc"
+    app_name = os.environ["APP_NAME"]
+    app_name = re.sub(r'[^a-zA-Z0-9]', '', app_name)
+    if not app_name:
+        raise ValueError("APP_NAME is not a valid Modal app name")
+    return app_name
+
 # ---------------------------------------------------------------------------
 # Images
 # ---------------------------------------------------------------------------
+APP_NAME = get_app_name()
 api_image = (
     modal.Image.debian_slim(python_version="3.11")
     .pip_install("fastapi[standard]", "pydantic", "httpx", "markdownify")
     .add_local_dir("api", "/root/api")
-    .add_local_file("config/sites.json", "/root/config/sites.json")
+    .add_local_file("config/sites.json", "/root/sites.json")
     .add_local_file("ui/ui.html", "/root/ui.html")
+    .add_local_file(".env", "/root/.env")
 )
 
 minimal_image = modal.Image.debian_slim(python_version="3.11")
@@ -54,7 +76,7 @@ minimal_image = modal.Image.debian_slim(python_version="3.11")
 # ---------------------------------------------------------------------------
 # App + PlaywrightWorker registration
 # ---------------------------------------------------------------------------
-app = modal.App("content-scraper-api", image=api_image)
+app = modal.App(APP_NAME, image=api_image)
 
 # Import worker pieces and register the class with our app.
 # PlaywrightWorkerBase uses @modal.enter/@modal.exit/@modal.method but has no
@@ -150,9 +172,7 @@ def set_cached(cache_key: str, data: dict) -> None:
 
 
 def load_sites_from_file() -> dict[str, dict]:
-    config_path = Path("/root/config/sites.json")
-    if not config_path.exists():
-        config_path = Path(__file__).parent.parent / "config" / "sites.json"
+    config_path = Path("/root/sites.json")
     with open(config_path) as f:
         return json.load(f)["sites"]
 
@@ -1306,5 +1326,5 @@ def refresh_cache():
 @app.function()
 @modal.concurrent(max_inputs=100)
 @modal.asgi_app(requires_proxy_auth=IS_PROD)
-def fastapi_app():
+def pull():
     return web_app
