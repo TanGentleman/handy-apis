@@ -1327,4 +1327,8 @@ def refresh_cache():
 @modal.concurrent(max_inputs=100)
 @modal.asgi_app(requires_proxy_auth=IS_PROD)
 def pull():
+    # this function's url
+    url = pull.get_web_url()
+    if os.environ.get("SCRAPER_API_URL") != url:
+        print(f"SCRAPER_API_URL is not set to the correct value: {url}")
     return web_app
