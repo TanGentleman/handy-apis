@@ -1270,8 +1270,9 @@ async def api_discover_post(req: _DiscoverPostBody):
 
     suggested = {
         "name": site_id, "baseUrl": base_url, "mode": "browser",
+        "testPath": test_path,
         "links": {"startUrls": [""], "pattern": ""},
-        "content": {"mode": "browser", "selector": content_selector, "method": content_method},
+        "content": {"selector": content_selector, "method": content_method},
     }
     lines.append(f'\n"{site_id}": {json.dumps(suggested, indent=2)}')
     lines.append("\n" + "=" * 70)
