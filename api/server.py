@@ -478,9 +478,8 @@ async def get_sites_config_endpoint():
 
 @web_app.post("/sites/{site_id}")
 async def add_site(site_id: str, config: SiteConfig):
-    try:
-        current = sites_dict.get("_all_sites", {})
-    except KeyError:
+    current = sites_dict.get("_all_sites")
+    if current is None:
         current = load_sites_from_file()
     current[site_id] = config.model_dump()
     sites_dict["_all_sites"] = current
@@ -489,9 +488,8 @@ async def add_site(site_id: str, config: SiteConfig):
 
 @web_app.delete("/sites/{site_id}")
 async def delete_site(site_id: str):
-    try:
-        current = sites_dict.get("_all_sites", {})
-    except KeyError:
+    current = sites_dict.get("_all_sites")
+    if current is None:
         current = load_sites_from_file()
     if site_id not in current:
         raise HTTPException(status_code=404, detail=f"Site not found: {site_id}")
