@@ -335,6 +335,24 @@
         "selector": "main",
         "method": "inner_html"
       }
+    },
+    "temporal": {
+      "name": "Temporal",
+      "baseUrl": "https://docs.temporal.io",
+      "testPath": "/encyclopedia",
+      "mode": "fetch",
+      "links": {
+        "startUrls": [
+          ""
+        ],
+        "pattern": "/",
+        "maxDepth": 2
+      },
+      "content": {
+        "mode": "browser",
+        "selector": "//button[@title='Copy page markdown for use with LLMs']",
+        "method": "click_copy"
+      }
     }
   }
 }
