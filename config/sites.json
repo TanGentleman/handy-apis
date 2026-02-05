@@ -77,7 +77,6 @@
           ""
         ],
         "pattern": "/providers/hashicorp/aws/latest/docs",
-        "waitFor": "#provider-docs-content",
         "waitUntil": "domcontentloaded"
       },
       "content": {
@@ -224,8 +223,6 @@
         "maxDepth": 2
       },
       "content": {
-        "mode": "browser",
-        "waitFor": "#content",
         "selector": "#content",
         "method": "inner_html"
       }
@@ -243,8 +240,6 @@
         "maxDepth": 2
       },
       "content": {
-        "mode": "browser",
-        "waitFor": "main",
         "selector": "main",
         "method": "inner_html"
       }
@@ -262,8 +257,6 @@
         "maxDepth": 2
       },
       "content": {
-        "mode": "browser",
-        "waitFor": "main",
         "selector": "main",
         "method": "inner_html"
       }
@@ -281,8 +274,6 @@
         "maxDepth": 2
       },
       "content": {
-        "mode": "browser",
-        "waitFor": "main",
         "selector": "main",
         "method": "inner_html"
       }
@@ -300,8 +291,6 @@
         "maxDepth": 2
       },
       "content": {
-        "mode": "browser",
-        "waitFor": "main",
         "selector": "main",
         "method": "inner_html"
       }
@@ -319,8 +308,6 @@
         "maxDepth": 2
       },
       "content": {
-        "mode": "browser",
-        "waitFor": "//button[@aria-label='Copy page']",
         "selector": "//button[@aria-label='Copy page']",
         "method": "click_copy"
       }
@@ -338,10 +325,25 @@
         "maxDepth": 2
       },
       "content": {
-        "mode": "browser",
-        "waitFor": "main",
         "selector": "main",
         "method": "inner_html"
+      }
+    },
+    "temporal": {
+      "name": "Temporal",
+      "baseUrl": "https://docs.temporal.io",
+      "testPath": "/encyclopedia",
+      "mode": "browser",
+      "links": {
+        "startUrls": [
+          "", "/encyclopedia", "/develop/go", "/cloud/get-started"
+        ],
+        "pattern": "/",
+        "maxDepth": 2
+      },
+      "content": {
+        "selector": "//button[@title='Copy page markdown for use with LLMs']",
+        "method": "click_copy"
       }
     }
   }
