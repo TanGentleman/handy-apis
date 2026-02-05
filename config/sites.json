@@ -333,10 +333,10 @@
       "name": "Temporal",
       "baseUrl": "https://docs.temporal.io",
       "testPath": "/encyclopedia",
-      "mode": "fetch",
+      "mode": "browser",
       "links": {
         "startUrls": [
-          "/encyclopedia"
+          "", "/encyclopedia", "/develop/go", "/cloud/get-started"
         ],
         "pattern": "/",
         "maxDepth": 2
