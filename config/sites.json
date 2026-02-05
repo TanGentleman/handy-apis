@@ -223,7 +223,6 @@
         "maxDepth": 2
       },
       "content": {
-        "mode": "browser",
         "selector": "#content",
         "method": "inner_html"
       }
@@ -241,7 +240,6 @@
         "maxDepth": 2
       },
       "content": {
-        "mode": "browser",
         "selector": "main",
         "method": "inner_html"
       }
@@ -259,7 +257,6 @@
         "maxDepth": 2
       },
       "content": {
-        "mode": "browser",
         "selector": "main",
         "method": "inner_html"
       }
@@ -277,7 +274,6 @@
         "maxDepth": 2
       },
       "content": {
-        "mode": "browser",
         "selector": "main",
         "method": "inner_html"
       }
@@ -295,7 +291,6 @@
         "maxDepth": 2
       },
       "content": {
-        "mode": "browser",
         "selector": "main",
         "method": "inner_html"
       }
@@ -313,7 +308,6 @@
         "maxDepth": 2
       },
       "content": {
-        "mode": "browser",
         "selector": "//button[@aria-label='Copy page']",
         "method": "click_copy"
       }
@@ -331,7 +325,6 @@
         "maxDepth": 2
       },
       "content": {
-        "mode": "browser",
         "selector": "main",
         "method": "inner_html"
       }
@@ -343,13 +336,12 @@
       "mode": "fetch",
       "links": {
         "startUrls": [
-          ""
+          "/encyclopedia"
         ],
         "pattern": "/",
         "maxDepth": 2
       },
       "content": {
-        "mode": "browser",
         "selector": "//button[@title='Copy page markdown for use with LLMs']",
         "method": "click_copy"
       }
