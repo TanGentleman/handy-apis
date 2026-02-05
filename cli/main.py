@@ -55,6 +55,57 @@ def sites():
         print(site["id"])
 
 
+@app.command(name="sync-sites")
+def sync_sites(
+    output: Annotated[str, typer.Option("--output", "-o", help="Output file path")] = "config/sites.json",
+    dry_run: Annotated[bool, typer.Option("--dry-run", help="Print to stdout instead of writing file")] = False,
+):
+    """Export current sites config from API to local sites.json.
+
+    Use this to sync sites added via UI back to your local codebase.
+    """
+    try:
+        resp = httpx.get(f"{API_BASE}/sites/export", headers=get_auth_headers(), timeout=30.0)
+        resp.raise_for_status()
+    except httpx.HTTPStatusError as e:
+        handle_http_error(e)
+
+    data = resp.json()
+    sites_count = len(data.get("sites", {}))
+
+    if dry_run:
+        print(json.dumps(data, indent=2))
+        print(f"\n# {sites_count} sites (dry run - not written)", file=sys.stderr)
+    else:
+        with open(output, "w") as f:
+            json.dump(data, f, indent=2)
+            f.write("\n")
+        print(f"Synced {sites_count} sites to {output}", file=sys.stderr)
+
+
+@app.command(name="reload-sites")
+def reload_sites():
+    """Reload sites config from sites.json (clears Dict cache).
+
+    Use after updating sites.json to pick up changes without redeploying.
+    """
+    try:
+        resp = httpx.post(
+            f"{API_BASE}/api/sites/reset",
+            headers=get_auth_headers(),
+            timeout=30.0,
+        )
+        resp.raise_for_status()
+    except httpx.HTTPStatusError as e:
+        handle_http_error(e)
+
+    data = resp.json()
+    if data.get("success"):
+        print(data.get("stdout", "Sites reloaded"), file=sys.stderr)
+    else:
+        print(f"Error: {data.get('stderr', 'Unknown error')}", file=sys.stderr)
+
+
 @app.command()
 def discover(
     url: Annotated[str, typer.Argument(help="Full URL of a documentation page to analyze")],
