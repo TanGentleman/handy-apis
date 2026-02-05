@@ -442,8 +442,10 @@ class PlaywrightWorkerBase:
 
     def _find_copy_buttons(self, page, url: str) -> list[dict]:
         patterns = [
-            "//button[@aria-label='Copy page']",
-            "//button[@title='Copy page']",
+            # Flexible title/aria-label matches (catches "Copy page", "Copy page markdown for use with LLMs", etc.)
+            "//button[contains(@title, 'Copy page')]",
+            "//button[contains(@aria-label, 'Copy page')]",
+            # Text content matches
             "//button[.//span[contains(text(), 'Copy page')]]",
             "//button[contains(., 'Copy page')]",
             "button[type='button']:has(div:has-text('Copy as Markdown'))",
