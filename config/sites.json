@@ -77,7 +77,6 @@
           ""
         ],
         "pattern": "/providers/hashicorp/aws/latest/docs",
-        "waitFor": "#provider-docs-content",
         "waitUntil": "domcontentloaded"
       },
       "content": {
@@ -225,7 +224,6 @@
       },
       "content": {
         "mode": "browser",
-        "waitFor": "#content",
         "selector": "#content",
         "method": "inner_html"
       }
@@ -244,7 +242,6 @@
       },
       "content": {
         "mode": "browser",
-        "waitFor": "main",
         "selector": "main",
         "method": "inner_html"
       }
@@ -263,7 +260,6 @@
       },
       "content": {
         "mode": "browser",
-        "waitFor": "main",
         "selector": "main",
         "method": "inner_html"
       }
@@ -282,7 +278,6 @@
       },
       "content": {
         "mode": "browser",
-        "waitFor": "main",
         "selector": "main",
         "method": "inner_html"
       }
@@ -301,7 +296,6 @@
       },
       "content": {
         "mode": "browser",
-        "waitFor": "main",
         "selector": "main",
         "method": "inner_html"
       }
@@ -320,7 +314,6 @@
       },
       "content": {
         "mode": "browser",
-        "waitFor": "//button[@aria-label='Copy page']",
         "selector": "//button[@aria-label='Copy page']",
         "method": "click_copy"
       }
@@ -339,7 +332,6 @@
       },
       "content": {
         "mode": "browser",
-        "waitFor": "main",
         "selector": "main",
         "method": "inner_html"
       }
