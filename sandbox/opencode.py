@@ -25,6 +25,7 @@
 
 import os
 import secrets
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -211,6 +212,10 @@ def create_opencode_sandbox(
     print("🏖️  Creating sandbox...")
     timeout = int(timeout_hours * HOURS)
 
+    # idle_timeout auto-terminates the sandbox after 30 min of no
+    # open connections or running commands — saves cost if you forget.
+    idle_timeout = int(min(timeout, 30 * MINUTES))
+
     with modal.enable_output():
         sandbox = modal.Sandbox.create(
             "opencode",
@@ -226,14 +231,25 @@ def create_opencode_sandbox(
             workdir=workdir,
             encrypted_ports=[OPENCODE_PORT],
             timeout=timeout,
+            idle_timeout=idle_timeout,
         )
 
-    # Get the tunnel URL
-    tunnel = sandbox.tunnels()[OPENCODE_PORT]
+    # Wait for tunnel to be provisioned (may take a moment)
+    tunnel = None
+    for _ in range(10):
+        tunnels = sandbox.tunnels()
+        if OPENCODE_PORT in tunnels:
+            tunnel = tunnels[OPENCODE_PORT]
+            break
+        time.sleep(1)
+
+    if tunnel is None:
+        print("⚠️  Tunnel not ready yet. Use `modal shell` to access the sandbox.")
+        print(f"   modal shell {sandbox.object_id}")
 
     result = {
         "sandbox_id": sandbox.object_id,
-        "web_url": tunnel.url,
+        "web_url": tunnel.url if tunnel else None,
         "password": password,
         "username": "opencode",
         "workdir": workdir,
@@ -303,6 +319,8 @@ def upload_docs_to_volume(
     print(f"📤 Uploading docs from {docs_path}...")
     file_count = 0
 
+    # batch_upload handles the remote write when the context manager exits.
+    # volume.commit() is only valid inside a Modal container — not needed here.
     with volume.batch_upload() as batch:
         for file_path in docs_path.rglob("*"):
             if file_path.is_file() and not file_path.name.startswith("."):
@@ -313,7 +331,6 @@ def upload_docs_to_volume(
                 if file_count % 10 == 0:
                     print(f"   Uploaded {file_count} files...")
 
-    volume.commit()
     print(f"✅ Uploaded {file_count} files to {volume_name}")
     return file_count
 
@@ -443,6 +460,12 @@ if __name__ == "__main__":
         help="Stop a running sandbox instead of starting one"
     )
     parser.add_argument(
+        "--status",
+        type=str,
+        metavar="SANDBOX_ID",
+        help="Check status of a running sandbox"
+    )
+    parser.add_argument(
         "--list",
         action="store_true",
         help="List running sandboxes"
@@ -452,6 +475,15 @@ if __name__ == "__main__":
 
     if args.stop:
         stop_sandbox(args.stop)
+    elif args.status:
+        info = get_sandbox_status(args.status)
+        if info:
+            print(f"Sandbox: {info['sandbox_id']}")
+            print(f"Status:  {info['status']}")
+            if info.get("web_url"):
+                print(f"Web UI:  {info['web_url']}")
+        else:
+            print(f"Sandbox {args.status} not found or not running")
     elif args.list:
         sandboxes = list_sandboxes()
         if sandboxes:

@@ -149,7 +149,6 @@ def setup_cloud_chat(
         )
 
     import secrets
-    import time
 
     collection_path = get_collection_path(collection)
 
@@ -159,54 +158,45 @@ def setup_cloud_chat(
     # Upload docs to volume
     print(f"Uploading {collection} to Modal Volume...", file=sys.stderr)
 
-    # Use batch_upload for efficiency
+    # batch_upload handles the remote write when the context manager exits
     with volume.batch_upload() as batch:
         for file_path in collection_path.rglob("*.md"):
             relative = file_path.relative_to(collection_path)
             remote_path = f"/docs/{collection}/{relative}"
             batch.put_file(file_path, remote_path)
 
-    volume.commit()
     print(f"Uploaded to volume: {volume_name}", file=sys.stderr)
+
+    # Reuse the sandbox module's image builder and constants
+    from sandbox.opencode import get_opencode_image, APP_NAME, OPENCODE_PORT
 
     # Generate password for OpenCode
     password = secrets.token_urlsafe(12)
+    password_secret = modal.Secret.from_dict({"OPENCODE_SERVER_PASSWORD": password})
 
     # Create sandbox with OpenCode
     print("Creating Modal Sandbox with OpenCode...", file=sys.stderr)
 
-    # Define the sandbox image
-    sandbox_image = (
-        modal.Image.debian_slim(python_version="3.11")
-        .apt_install("git", "curl")
-        .run_commands(
-            # Install Go (required for OpenCode)
-            "curl -L https://go.dev/dl/go1.22.0.linux-amd64.tar.gz | tar -C /usr/local -xzf -",
-            "ln -s /usr/local/go/bin/go /usr/local/bin/go",
-            # Install OpenCode
-            "go install github.com/opencode-ai/opencode@latest",
+    image = get_opencode_image()
+    app = modal.App.lookup(APP_NAME, create_if_missing=True)
+
+    with modal.enable_output():
+        sandbox = modal.Sandbox.create(
+            "opencode",
+            "serve",
+            "--hostname=0.0.0.0",
+            f"--port={OPENCODE_PORT}",
+            image=image,
+            app=app,
+            secrets=[password_secret],
+            volumes={"/docs": volume},
+            workdir=f"/docs/{collection}",
+            encrypted_ports=[OPENCODE_PORT],
+            timeout=3600,  # 1 hour
         )
-        .env({
-            "PATH": "/root/go/bin:/usr/local/go/bin:/usr/local/bin:/usr/bin:/bin",
-            "OPENCODE_SERVER_PASSWORD": password,
-        })
-    )
-
-    # Create the sandbox
-    sandbox = modal.Sandbox.create(
-        image=sandbox_image,
-        volumes={"/docs": volume},
-        timeout=3600,  # 1 hour
-        encrypted_ports=[8080],
-        entrypoint=["opencode", "server", "--port", "8080", "--host", "0.0.0.0"],
-    )
-
-    # Wait for sandbox to be ready
-    print("Waiting for sandbox to start...", file=sys.stderr)
-    time.sleep(5)
 
     # Get tunnel URL
-    tunnel = sandbox.tunnels()[8080]
+    tunnel = sandbox.tunnels()[OPENCODE_PORT]
     web_url = tunnel.url
 
     return {
