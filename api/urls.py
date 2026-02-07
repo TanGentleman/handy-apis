@@ -18,6 +18,10 @@ ASSET_EXTENSIONS = frozenset({
     ".exe", ".dmg", ".pkg", ".deb", ".rpm",
     # Feeds
     ".xml", ".rss", ".atom",
+    # Web assets (stylesheets, scripts, fonts, source maps)
+    ".css", ".js", ".mjs", ".ts", ".jsx", ".tsx",
+    ".woff", ".woff2", ".ttf", ".otf", ".eot",
+    ".map",
 })
 
 

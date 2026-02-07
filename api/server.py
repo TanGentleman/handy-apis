@@ -300,6 +300,8 @@ def extract_links_from_html(html: str, base_url: str, pattern: str) -> list[str]
             link = f"{parsed.scheme}://{parsed.netloc}{link}"
         elif not link.startswith("http"):
             link = urljoin(base_url, link)
+        if is_asset_url(link):
+            continue
         if pattern and pattern not in link:
             if link != base_url and link != f"{base_url}/":
                 continue
@@ -502,6 +504,15 @@ async def reset_sites():
     file_sites = load_sites_from_file()
     sites_dict["_all_sites"] = file_sites
     return {"success": True, "count": len(file_sites), "sites": list(file_sites.keys()), "message": f"Reset to {len(file_sites)} sites from sites.json"}
+
+
+@web_app.get("/sites/export")
+async def export_sites():
+    """Export current sites config as JSON (for syncing back to sites.json)."""
+    sites_config = load_sites_config()
+    # Convert to the format used in sites.json
+    export_data = {"sites": {sid: cfg.model_dump(exclude_none=True) for sid, cfg in sites_config.items()}}
+    return export_data
 
 
 # --- Discover ------------------------------------------------------
@@ -827,6 +838,8 @@ async def download_site(
 
     paths: list[str] = []
     for link in links_response.links:
+        if is_asset_url(link):
+            continue
         if link.startswith(base_url):
             paths.append(link[len(base_url):])
         else:
@@ -1169,6 +1182,11 @@ async def api_get_sites_config():
     return await get_sites_config_endpoint()
 
 
+@web_app.get("/api/sites/export")
+async def api_export_sites():
+    return await export_sites()
+
+
 @web_app.get("/api/sites/{site_id}/links")
 async def api_get_links(site_id: str):
     return await get_site_links(site_id)
@@ -1260,6 +1278,12 @@ async def api_discover_post(req: _DiscoverPostBody):
     # Build suggested config
     parsed = urlparse(req.url)
     site_id = parsed.hostname.replace(".", "-").replace("docs-", "").replace("www-", "")
+    # Use the discovered URL's path as the testPath
+    test_path = parsed.path or ""
+    if base_url and test_path.startswith(urlparse(base_url).path):
+        # Remove the base URL path prefix to get relative testPath
+        base_path = urlparse(base_url).path
+        test_path = test_path[len(base_path):]
     content_method = "inner_html"
     content_selector = "main"
     if working:
@@ -1388,18 +1412,46 @@ async def api_export(http_req: Request, req: _ExportPostBody):
 
 @app.function(schedule=modal.Period(days=6), image=minimal_image)
 def refresh_cache():
-    """Touch all cache entries to prevent Modal Dict 7-day expiration."""
-    _c = modal.Dict.from_name("scraper-cache", create_if_missing=True)
-    keys = list(_c.keys())
-    refreshed = 0
-    for key in keys:
+    """Touch all Dict entries to prevent Modal Dict 7-day expiration."""
+    stats = {}
+
+    # Refresh scraper-cache
+    _cache = modal.Dict.from_name("scraper-cache", create_if_missing=True)
+    cache_keys = list(_cache.keys())
+    cache_refreshed = 0
+    for key in cache_keys:
         try:
-            _ = _c[key]
-            refreshed += 1
+            _ = _cache[key]
+            cache_refreshed += 1
         except KeyError:
             pass
-    print(f"[refresh_cache] Refreshed {refreshed}/{len(keys)} entries")
-    return {"refreshed": refreshed, "total_keys": len(keys)}
+    stats["cache"] = {"refreshed": cache_refreshed, "total": len(cache_keys)}
+
+    # Refresh scraper-sites
+    _sites = modal.Dict.from_name("scraper-sites", create_if_missing=True)
+    try:
+        sites_data = _sites.get("_all_sites")
+        if sites_data:
+            stats["sites"] = {"refreshed": 1, "count": len(sites_data)}
+        else:
+            stats["sites"] = {"refreshed": 0, "count": 0}
+    except KeyError:
+        stats["sites"] = {"refreshed": 0, "count": 0}
+
+    # Refresh scraper-errors
+    _errors = modal.Dict.from_name("scraper-errors", create_if_missing=True)
+    error_keys = list(_errors.keys())
+    errors_refreshed = 0
+    for key in error_keys:
+        try:
+            _ = _errors[key]
+            errors_refreshed += 1
+        except KeyError:
+            pass
+    stats["errors"] = {"refreshed": errors_refreshed, "total": len(error_keys)}
+
+    print(f"[refresh_cache] cache={stats['cache']}, sites={stats['sites']}, errors={stats['errors']}")
+    return stats
 
 
 # ===========================================================================

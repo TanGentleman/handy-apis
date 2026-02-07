@@ -55,6 +55,13 @@ class TestIsAssetUrl:
         assert is_asset_url("https://example.com/file.pdf?v=1") is True
         assert is_asset_url("https://example.com/page?format=pdf") is False
 
+    def test_web_asset_files(self):
+        assert is_asset_url("https://example.com/styles.css") is True
+        assert is_asset_url("https://example.com/_astro/ec.4c0k7.css") is True
+        assert is_asset_url("https://example.com/app.js") is True
+        assert is_asset_url("https://example.com/font.woff2") is True
+        assert is_asset_url("https://example.com/bundle.js.map") is True
+
     def test_all_extensions_covered(self):
         """Verify the extension set is comprehensive."""
         expected_extensions = {
@@ -64,6 +71,9 @@ class TestIsAssetUrl:
             ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
             ".exe", ".dmg", ".pkg", ".deb", ".rpm",
             ".xml", ".rss", ".atom",
+            ".css", ".js", ".mjs", ".ts", ".jsx", ".tsx",
+            ".woff", ".woff2", ".ttf", ".otf", ".eot",
+            ".map",
         }
         assert ASSET_EXTENSIONS == expected_extensions
 

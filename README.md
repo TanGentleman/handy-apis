@@ -61,4 +61,5 @@ Output is saved to `./docs/<site-id>/<page-path>.md`.
 
 - [API Reference](API.md) - REST API, bulk jobs, export, cache
 - [Architecture](ARCHITECTURE.md) - System design and components
+- [Testing Guide](TESTING.md) - Verify your setup works correctly
 - [Teardown](teardown.py) - Stop deployments with `python teardown.py`

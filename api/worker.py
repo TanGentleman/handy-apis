@@ -18,7 +18,7 @@ from urllib.parse import urlparse
 
 import modal
 
-from api.urls import clean_url
+from api.urls import clean_url, is_asset_url
 
 # ---------------------------------------------------------------------------
 # Image
@@ -220,6 +220,8 @@ class PlaywrightWorkerBase:
                 )
                 for link in raw_links:
                     clean = clean_url(link)
+                    if is_asset_url(clean):
+                        continue
                     if pattern and pattern not in clean:
                         if clean != base_url and clean != f"{base_url}/":
                             continue
